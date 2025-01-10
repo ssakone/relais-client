@@ -25,6 +25,7 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
           cache: "npm"
+          cache-dependency-path: pnpm-lock.yaml
       - run: corepack enable
       - run: pnpm install
       - run: pnpm run build --if-present
