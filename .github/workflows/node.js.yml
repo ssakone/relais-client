@@ -27,6 +27,7 @@ jobs:
           cache: "pnpm"
           cache-dependency-path: pnpm-lock.yaml
       - run: corepack enable
+      - run: npm install -g pnpm
       - run: corepack prepare pnpm@latest --activate
       - run: pnpm install
       - run: pnpm run build --if-present
