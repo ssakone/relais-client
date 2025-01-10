@@ -10,9 +10,20 @@
   "scripts": {
     "start": "node src/cli.cjs"
   },
-  "keywords": ["tunnel", "relais", "client"],
+  "keywords": ["tunnel", "relais", "client", "proxy", "localhost"],
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ssakone/relais-client.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ssakone/relais-client/issues"
+  },
+  "homepage": "https://github.com/ssakone/relais-client#readme",
+  "engines": {
+    "node": ">=18.20.3"
+  },
   "dependencies": {
     "commander": "10.0.1"
   },
