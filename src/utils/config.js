@@ -28,7 +28,6 @@ export async function saveToken(token) {
     const configDir = await getConfigDir();
     const tokenFile = join(configDir, 'token');
     await writeFile(tokenFile, token);
-    console.log('Token saved successfully!');
   } catch (err) {
     throw new Error(`Error saving token: ${err.message}`);
   }
