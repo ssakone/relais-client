@@ -2,7 +2,8 @@ import { Socket } from 'net';
 import { debug } from '../utils/debug.js';
 
 export function setKeepAlive(socket) {
-  socket.setKeepAlive(true, 30000); // 30 seconds like in Go client
+  // 30 seconds like in Go client
+  socket.setKeepAlive(true, 30000);
 }
 
 export function setNoDelay(socket) {
@@ -50,15 +51,23 @@ export async function handleNewConnection(options, response) {
     // Connect to data port
     await new Promise((resolve, reject) => {
       debug(`Attempting to connect to data port: ${dataHost}:${dataPort}`);
-      dataConn.connect({
-        host: dataHost,
-        port: parseInt(dataPort),
-      }, () => {
-        debug('Connected to data port:', response.data_addr);
-        setKeepAlive(dataConn);
-        setNoDelay(dataConn);
-        resolve();
-      });
+      dataConn.connect(
+        {
+          host: dataHost,
+          port: parseInt(dataPort),
+        },
+        () => {
+          debug('Connected to data port:', response.data_addr);
+          setKeepAlive(dataConn);
+          setNoDelay(dataConn);
+          // Set a timeout on the data connection (60 seconds)
+          dataConn.setTimeout(60000, () => {
+            debug('Data connection timed out');
+            dataConn.destroy();
+          });
+          resolve();
+        }
+      );
       
       dataConn.on('error', (err) => {
         debug('Data connection error:', err);
@@ -70,16 +79,23 @@ export async function handleNewConnection(options, response) {
     const localConn = new Socket();
     await new Promise((resolve, reject) => {
       debug(`Attempting to connect to local service: ${options.host}:${options.port}`);
-      
-      localConn.connect({
-        host: options.host,
-        port: parseInt(options.port),
-      }, () => {
-        debug('Connected to local service:', `${options.host}:${options.port}`);
-        setKeepAlive(localConn);
-        setNoDelay(localConn);
-        resolve();
-      });
+      localConn.connect(
+        {
+          host: options.host,
+          port: parseInt(options.port),
+        },
+        () => {
+          debug('Connected to local service:', `${options.host}:${options.port}`);
+          setKeepAlive(localConn);
+          setNoDelay(localConn);
+          // Set a timeout on the local connection (60 seconds)
+          localConn.setTimeout(60000, () => {
+            debug('Local connection timed out');
+            localConn.destroy();
+          });
+          resolve();
+        }
+      );
       
       localConn.on('error', (err) => {
         debug('Local connection error:', err);
@@ -91,10 +107,9 @@ export async function handleNewConnection(options, response) {
     // 3. Handle bidirectional data transfer
     debug('Starting bidirectional transfer');
 
-    // Simulate Go's CloseWrite() behavior by only closing the write stream
+    // Simulate Go's CloseWrite() behavior by closing the write half.
     function closeWrite(socket) {
       debug('Closing write stream');
-      // Use end() to properly close the write stream
       socket.end(() => {
         debug('Write stream closed');
       });
@@ -104,35 +119,39 @@ export async function handleNewConnection(options, response) {
     let localConnClosed = false;
 
     // First transfer: localConn -> dataConn
-    copyData(dataConn, localConn).then(() => {
-      debug('Transfer localConn -> dataConn completed');
-      if (!dataConnClosed) {
-        dataConnClosed = true;
-        closeWrite(dataConn);
-      }
-    }).catch(err => {
-      debug('Error during transfer localConn -> dataConn:', err);
-      dataConn.destroy();
-      localConn.destroy();
-    });
+    copyData(dataConn, localConn)
+      .then(() => {
+        debug('Transfer localConn -> dataConn completed');
+        if (!dataConnClosed) {
+          dataConnClosed = true;
+          closeWrite(dataConn);
+        }
+      })
+      .catch((err) => {
+        debug('Error during transfer localConn -> dataConn:', err);
+        dataConn.destroy();
+        localConn.destroy();
+      });
 
     // Second transfer: dataConn -> localConn
-    copyData(localConn, dataConn).then(() => {
-      debug('Transfer dataConn -> localConn completed');
-      if (!localConnClosed) {
-        localConnClosed = true;
-        closeWrite(localConn);
-      }
-    }).catch(err => {
-      debug('Error during transfer dataConn -> localConn:', err);
-      dataConn.destroy();
-      localConn.destroy();
-    });
+    copyData(localConn, dataConn)
+      .then(() => {
+        debug('Transfer dataConn -> localConn completed');
+        if (!localConnClosed) {
+          localConnClosed = true;
+          closeWrite(localConn);
+        }
+      })
+      .catch((err) => {
+        debug('Error during transfer dataConn -> localConn:', err);
+        dataConn.destroy();
+        localConn.destroy();
+      });
 
-    // Wait for both sockets to close naturally
+    // Wait for both sockets to close naturally.
     await Promise.all([
-      new Promise(resolve => dataConn.on('end', resolve)),
-      new Promise(resolve => localConn.on('end', resolve))
+      new Promise((resolve) => dataConn.on('end', resolve)),
+      new Promise((resolve) => localConn.on('end', resolve)),
     ]);
 
     debug('Both connections have ended');

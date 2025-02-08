@@ -10,7 +10,13 @@
   "scripts": {
     "start": "node src/cli.cjs"
   },
-  "keywords": ["tunnel", "relais", "client", "proxy", "localhost"],
+  "keywords": [
+    "tunnel",
+    "relais",
+    "client",
+    "proxy",
+    "localhost"
+  ],
   "author": "",
   "license": "MIT",
   "repository": {

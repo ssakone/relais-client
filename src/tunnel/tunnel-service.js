@@ -27,12 +27,12 @@ function createJSONDecoder(socket) {
           return false;
         }
 
-        // First check if we already have a complete message in the buffer
+        // First check if we already have a complete message in the buffer.
         if (tryParse()) {
           return;
         }
 
-        // Otherwise, set up listeners to receive more data
+        // Otherwise, set up listeners to receive more data.
         function onData(data) {
           buffer += data.toString();
           if (tryParse()) {
@@ -60,7 +60,7 @@ function createJSONDecoder(socket) {
         socket.on('error', onError);
         socket.on('end', onEnd);
       });
-    }
+    },
   };
 }
 
@@ -73,14 +73,28 @@ export async function connectAndServe(options) {
 
   try {
     await new Promise((resolve, reject) => {
-      ctrlConn.connect({
-        host: serverHost,
-        port: parseInt(serverPort)
-      }, () => {
-        debug('Connected to relay server:', options.server);
-        setKeepAlive(ctrlConn);
-        resolve();
-      });
+      ctrlConn.connect(
+        {
+          host: serverHost,
+          port: parseInt(serverPort),
+          // proxy: {
+          //   host: '162.250.189.217',  // your SOCKS5 proxy host
+          //   port: 4080,         // your SOCKS5 proxy port
+          //   type: 5             // SOCKS version
+          // },
+        },
+       
+        () => {
+          debug('Connected to relay server:', options.server);
+          setKeepAlive(ctrlConn);
+          // Increased timeout on the control connection (120 seconds now)
+          ctrlConn.setTimeout(120000, () => {
+            debug('Control connection timed out');
+            ctrlConn.destroy();
+          });
+          resolve();
+        }
+      );
       
       ctrlConn.on('error', reject);
     });
@@ -129,14 +143,15 @@ export async function connectAndServe(options) {
         debug('Message received:', msg);
 
         if (msg.command === 'NEWCONN') {
-          // Handle new connection asynchronously
-          handleNewConnection(options, msg).catch(err => {
+          // Handle new connection asynchronously.
+          handleNewConnection(options, msg).catch((err) => {
             debug('Error handling new connection:', err);
           });
         } else {
           debug('Unexpected message received:', msg);
         }
       } catch (err) {
+        // If the connection is closed by the server, exit the loop
         if (err.message === 'Connection closed by server') {
           throw err;
         }
@@ -153,6 +168,22 @@ export async function connectAndServe(options) {
       } catch (err) {
         debug('Error closing control connection:', err);
       }
+    }
+  }
+}
+
+/**
+ * Wraps connectAndServe() with an auto-reconnect loop.
+ * If the control connection fails due to network issues,
+ * it waits for 5 seconds before retrying.
+ */
+export async function runTunnel(options) {
+  while (true) {
+    try {
+      await connectAndServe(options);
+    } catch (err) {
+      debug('Tunnel service disconnected, reconnecting in 5 seconds...', err);
+      await new Promise((resolve) => setTimeout(resolve, 5000));
     }
   }
 }
