@@ -1,6 +1,6 @@
 {
   "name": "relais",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Node.js client for the relay tunnel service",
   "main": "src/cli.cjs",
   "type": "module",

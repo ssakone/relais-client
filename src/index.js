@@ -8,13 +8,13 @@ import { debug } from './utils/debug.js';
 const program = new Command();
 
 // Configuration par défaut
-const DEFAULT_SERVER = '104.152.209.126:1080';
+const DEFAULT_SERVER = '104.168.64.151:1080';
 const DEFAULT_PROTOCOL = 'http';
 
 program
   .name('relais-node-client')
   .description('Client Node.js pour le service de tunnel relais')
-  .version('1.0.0');
+  .version('1.0.2');
 
 program
   .command('set-token <token>')

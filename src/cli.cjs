@@ -5,7 +5,7 @@ const path = require('path');
 const url = require('url');
 
 // Default configuration
-const DEFAULT_SERVER = '162.250.189.217:1080';
+const DEFAULT_SERVER = '104.168.64.151:1080';
 const DEFAULT_PROTOCOL = 'http';
 
 let debug = (...args) => {
