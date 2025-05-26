@@ -64,6 +64,28 @@ function createJSONDecoder(socket) {
   };
 }
 
+// Heartbeat management for keeping connection alive
+function startHeartbeatMonitoring(socket, lastHeartbeatReceived) {
+  const heartbeatInterval = 30000; // 30 seconds to detect missing heartbeats
+  
+  const checkHeartbeat = setInterval(() => {
+    const now = Date.now();
+    const timeSinceLastHeartbeat = now - lastHeartbeatReceived.value;
+    
+    if (timeSinceLastHeartbeat > heartbeatInterval) {
+      debug(`No heartbeat received for ${timeSinceLastHeartbeat}ms, connection may be dead`);
+      clearInterval(checkHeartbeat);
+      socket.destroy();
+    }
+  }, heartbeatInterval);
+  
+  socket.on('close', () => {
+    clearInterval(checkHeartbeat);
+  });
+  
+  return checkHeartbeat;
+}
+
 export async function connectAndServe(options) {
   debug('Starting tunnel service');
   
@@ -87,8 +109,8 @@ export async function connectAndServe(options) {
         () => {
           debug('Connected to relay server:', options.server);
           setKeepAlive(ctrlConn);
-          // Increased timeout on the control connection (120 seconds now)
-          ctrlConn.setTimeout(120000, () => {
+          // Increased timeout to match server settings (120 seconds)
+          ctrlConn.setTimeout(180000, () => { // 3 minutes for control connection
             debug('Control connection timed out');
             ctrlConn.destroy();
           });
@@ -136,6 +158,10 @@ export async function connectAndServe(options) {
       console.log('🚀 Tunnel active! Accessible via:', `tcp://${serverHost}:${publicPort}`);
     }
 
+    // Initialize heartbeat monitoring
+    const lastHeartbeatReceived = { value: Date.now() };
+    const heartbeatChecker = startHeartbeatMonitoring(ctrlConn, lastHeartbeatReceived);
+
     // Main loop to receive new connections
     while (true) {
       try {
@@ -147,6 +173,10 @@ export async function connectAndServe(options) {
           handleNewConnection(options, msg).catch((err) => {
             debug('Error handling new connection:', err);
           });
+        } else if (msg.command === 'HEARTBEAT') {
+          // Update last heartbeat timestamp
+          lastHeartbeatReceived.value = Date.now();
+          debug('Heartbeat received, connection is alive');
         } else {
           debug('Unexpected message received:', msg);
         }
@@ -156,6 +186,7 @@ export async function connectAndServe(options) {
           throw err;
         }
         debug('Error reading message:', err);
+        throw err; // Re-throw to trigger reconnection
       }
     }
   } catch (err) {
@@ -178,12 +209,15 @@ export async function connectAndServe(options) {
  * it waits for 5 seconds before retrying.
  */
 export async function runTunnel(options) {
+  let retryDelay = 1000;
   while (true) {
     try {
       await connectAndServe(options);
+      retryDelay = 1000; // Réinitialiser après succès
     } catch (err) {
-      debug('Tunnel service disconnected, reconnecting in 5 seconds...', err);
-      await new Promise((resolve) => setTimeout(resolve, 5000));
+      debug(`Reconnecting in ${retryDelay}ms...`);
+      await new Promise(resolve => setTimeout(resolve, retryDelay));
+      retryDelay = Math.min(retryDelay * 2, 30000); // Max 30s
     }
   }
 }

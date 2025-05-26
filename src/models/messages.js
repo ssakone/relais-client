@@ -25,3 +25,9 @@ export class NewConnectionMsg {
     this.data_addr = dataAddr;
   }
 }
+
+export class HeartbeatMsg {
+  constructor() {
+    this.command = "HEARTBEAT";
+  }
+}

@@ -2,8 +2,8 @@ import { Socket } from 'net';
 import { debug } from '../utils/debug.js';
 
 export function setKeepAlive(socket) {
-  // 30 seconds like in Go client
-  socket.setKeepAlive(true, 30000);
+  // Increased to 60 seconds to match server settings
+  socket.setKeepAlive(true, 60000);
 }
 
 export function setNoDelay(socket) {
@@ -60,8 +60,8 @@ export async function handleNewConnection(options, response) {
           debug('Connected to data port:', response.data_addr);
           setKeepAlive(dataConn);
           setNoDelay(dataConn);
-          // Set a timeout on the data connection (60 seconds)
-          dataConn.setTimeout(60000, () => {
+          // Increased timeout to match server settings (120 seconds)
+          dataConn.setTimeout(120000, () => {
             debug('Data connection timed out');
             dataConn.destroy();
           });
@@ -88,8 +88,8 @@ export async function handleNewConnection(options, response) {
           debug('Connected to local service:', `${options.host}:${options.port}`);
           setKeepAlive(localConn);
           setNoDelay(localConn);
-          // Set a timeout on the local connection (60 seconds)
-          localConn.setTimeout(60000, () => {
+          // Increased timeout to match server settings (120 seconds)
+          localConn.setTimeout(120000, () => {
             debug('Local connection timed out');
             localConn.destroy();
           });

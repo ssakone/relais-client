@@ -14,7 +14,7 @@ const DEFAULT_PROTOCOL = 'http';
 program
   .name('relais-node-client')
   .description('Client Node.js pour le service de tunnel relais')
-  .version('1.0.2');
+  .version('1.1.0');
 
 program
   .command('set-token <token>')
