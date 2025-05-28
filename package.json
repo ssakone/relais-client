@@ -1,6 +1,6 @@
 {
   "name": "relais",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Node.js client for the relay tunnel service - Enhanced connection stability",
   "main": "src/cli.cjs",
   "type": "module",

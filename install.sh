@@ -3,7 +3,7 @@
 # Script d'installation pour le client Node.js Relais
 # Version 1.1.0 avec améliorations de stabilité
 
-echo "📦 Installation du client Node.js Relais v1.1.0"
+echo "📦 Installation du client Node.js Relais v1.1.1"
 echo "🔧 Avec améliorations de stabilité de connexion"
 echo ""
 

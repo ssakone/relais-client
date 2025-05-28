@@ -1,8 +1,8 @@
-# Relais Node.js Client v1.1.0
+# Relais Node.js Client v1.1.1
 
 A Node.js client for the relay tunnel service, allowing you to expose local services to the Internet with enhanced connection stability.
 
-## 🆕 What's New in v1.1.0
+## 🆕 What's New in v1.1.1
 
 - ✨ **Heartbeat Management**: Proper handling of server heartbeats for stable connections
 - 🔄 **Connection Monitoring**: Automatic detection of dead connections

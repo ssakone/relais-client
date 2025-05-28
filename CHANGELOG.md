@@ -1,6 +1,6 @@
 # Changelog
 
-## [1.1.0] - 2025-01-26
+## [1.1.1] - 2025-01-26
 
 ### Améliorations de la stabilité de connexion 🚀
 
