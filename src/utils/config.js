@@ -38,9 +38,15 @@ export async function loadToken() {
     const configDir = await getConfigDir();
     const tokenFile = join(configDir, 'token');
     const token = await readFile(tokenFile, 'utf8');
-    return token.trim();
+    const trimmedToken = token.trim();
+    if (!trimmedToken) {
+      throw new Error('Token file exists but is empty');
+    }
+    return trimmedToken;
   } catch (err) {
-    if (err.code === 'ENOENT') return '';
+    if (err.code === 'ENOENT') {
+      throw new Error('No token found. Use set-token command to save a token first');
+    }
     throw new Error(`Error loading token: ${err.message}`);
   }
 }
