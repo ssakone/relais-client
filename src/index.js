@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 
 import { Command } from 'commander';
-import { saveToken, loadToken } from './utils/config.js';
+import { saveToken, loadToken, getConfigDir } from './utils/config.js';
 import { connectAndServe } from './tunnel/tunnel-service.js';
+import { ConnectionFailureTracker } from './utils/failure-tracker.js';
 import { debug } from './utils/debug.js';
 
 const program = new Command();
@@ -22,8 +23,23 @@ program
   .action(async (token) => {
     try {
       await saveToken(token);
+      console.log('Token saved successfully');
     } catch (err) {
-      console.error(err.message);
+      console.error('Error saving token:', err.message);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('check-token')
+  .description('Vérifier si un token est sauvegardé et l\'afficher')
+  .action(async () => {
+    try {
+      const token = await loadToken();
+      console.log('Saved token found:', token.substring(0, 10) + '...' + token.substring(token.length - 4));
+      console.log('Token length:', token.length);
+    } catch (err) {
+      console.error('No valid token found:', err.message);
       process.exit(1);
     }
   });
@@ -52,8 +68,10 @@ program
     if (!options.token) {
       try {
         options.token = await loadToken();
+        console.log('Using saved token');
       } catch (err) {
-        console.error(err.message);
+        console.log(`Token loading failed: ${err.message}`);
+        // Continue without token - some servers might allow it
       }
     }
 
@@ -71,17 +89,97 @@ program
       remote: options.remote
     });
 
+    // Create failure tracker
+    const failureTracker = new ConnectionFailureTracker();
+
     while (true) {
       try {
-        await connectAndServe(options);
+        // Check if we should stop reconnecting
+        if (failureTracker.shouldStopReconnecting()) {
+          console.error(`Server closed connection ${failureTracker.maxFailuresPerMinute} times within the last minute. Stopping reconnection attempts. Please check your server configuration and try again later.`);
+          process.exit(1);
+        }
+
+        await connectAndServe(options, failureTracker);
       } catch (err) {
-        if (err.message.includes('Token')) {
+        if (err.message.includes('Token') || err.message.includes('Authentication')) {
           console.error('Erreur d\'authentification:', err.message);
           process.exit(1);
         }
-        console.error('Erreur de connexion:', err.message);
-        await new Promise(resolve => setTimeout(resolve, 5000));
+
+        // Record the failure when server closes connection
+        if (err.message.includes('Connection closed by server')) {
+          console.log(`[DEBUG] Server closed connection detected: "${err.message}"`);
+          failureTracker.recordFailure();
+          const backoffDuration = failureTracker.getBackoffDuration();
+          console.error(`Server closed connection: ${err.message}; reconnecting in ${backoffDuration}ms...`);
+          await new Promise(resolve => setTimeout(resolve, backoffDuration));
+        } else {
+          // For other errors, use fixed delay
+          console.log(`[DEBUG] Other connection error: "${err.message}"`);
+          console.error('Erreur de connexion:', err.message);
+          await new Promise(resolve => setTimeout(resolve, 5000));
+        }
       }
+    }
+  });
+
+program
+  .command('debug-config')
+  .description('Afficher des informations de débogage sur la configuration')
+  .action(async () => {
+    try {
+      const { getConfigDir } = await import('./utils/config.js');
+      const { access, stat } = await import('fs/promises');
+      const { constants } = await import('fs');
+      const { join } = await import('path');
+      
+      console.log('=== Configuration Debug Information ===');
+      console.log('Platform:', process.platform);
+      console.log('Home directory:', require('os').homedir());
+      
+      try {
+        const configDir = await getConfigDir();
+        console.log('Config directory:', configDir);
+        
+        const stats = await stat(configDir);
+        console.log('Directory exists:', true);
+        console.log('Directory permissions:', stats.mode.toString(8));
+        
+        // Check if we can write to the directory
+        try {
+          await access(configDir, constants.W_OK);
+          console.log('Directory writable:', true);
+        } catch (err) {
+          console.log('Directory writable:', false, err.message);
+        }
+        
+        // Check token file
+        const tokenFile = join(configDir, 'token');
+        try {
+          const tokenStats = await stat(tokenFile);
+          console.log('Token file exists:', true);
+          console.log('Token file permissions:', tokenStats.mode.toString(8));
+          console.log('Token file size:', tokenStats.size, 'bytes');
+          
+          try {
+            await access(tokenFile, constants.R_OK);
+            console.log('Token file readable:', true);
+          } catch (readErr) {
+            console.log('Token file readable:', false, readErr.message);
+          }
+        } catch (tokenErr) {
+          if (tokenErr.code === 'ENOENT') {
+            console.log('Token file exists:', false);
+          } else {
+            console.log('Token file error:', tokenErr.message);
+          }
+        }
+      } catch (err) {
+        console.log('Config directory error:', err.message);
+      }
+    } catch (err) {
+      console.error('Debug failed:', err.message);
     }
   });
 

@@ -2,6 +2,7 @@ import { Socket } from 'net';
 import { TunnelRequest } from '../models/messages.js';
 import { setKeepAlive, setNoDelay, handleNewConnection } from '../network/connection.js';
 import { debug } from '../utils/debug.js';
+import { ConnectionFailureTracker } from '../utils/failure-tracker.js';
 
 // Utility function to read a complete JSON message from socket
 function createJSONDecoder(socket) {
@@ -86,7 +87,7 @@ function startHeartbeatMonitoring(socket, lastHeartbeatReceived) {
   return checkHeartbeat;
 }
 
-export async function connectAndServe(options) {
+export async function connectAndServe(options, failureTracker = null) {
   debug('Starting tunnel service');
   
   // Connect to relay server (control channel)
@@ -181,8 +182,9 @@ export async function connectAndServe(options) {
           debug('Unexpected message received:', msg);
         }
       } catch (err) {
-        // If the connection is closed by the server, exit the loop
+        // If the connection is closed by the server, this is where we track it
         if (err.message === 'Connection closed by server') {
+          // Don't record failure here - let the caller handle it
           throw err;
         }
         debug('Error reading message:', err);
@@ -209,15 +211,30 @@ export async function connectAndServe(options) {
  * it waits for 5 seconds before retrying.
  */
 export async function runTunnel(options) {
-  let retryDelay = 1000;
+  const failureTracker = new ConnectionFailureTracker();
+  
   while (true) {
     try {
-      await connectAndServe(options);
-      retryDelay = 1000; // Réinitialiser après succès
+      // Check if we should stop reconnecting
+      if (failureTracker.shouldStopReconnecting()) {
+        console.error(`Server closed connection ${failureTracker.maxFailuresPerMinute} times within the last minute. Stopping reconnection attempts. Please check your server configuration and try again later.`);
+        process.exit(1);
+      }
+
+      await connectAndServe(options, failureTracker);
     } catch (err) {
-      debug(`Reconnecting in ${retryDelay}ms...`);
-      await new Promise(resolve => setTimeout(resolve, retryDelay));
-      retryDelay = Math.min(retryDelay * 2, 30000); // Max 30s
+      // Record failure when server closes connection
+      if (err.message.includes('Connection closed by server')) {
+        failureTracker.recordFailure();
+        const backoffDuration = failureTracker.getBackoffDuration();
+        debug(`Server closed connection: ${err.message}; reconnecting in ${backoffDuration}ms...`);
+        await new Promise(resolve => setTimeout(resolve, backoffDuration));
+      } else {
+        // For other errors, use exponential backoff but don't record as closure
+        const backoffDuration = failureTracker.getBackoffDuration();
+        debug(`Connection error: ${err.message}; reconnecting in ${backoffDuration}ms...`);
+        await new Promise(resolve => setTimeout(resolve, backoffDuration));
+      }
     }
   }
 }
