@@ -5,7 +5,7 @@
   "main": "src/cli.cjs",
   "type": "module",
   "bin": {
-    "relais": "./src/cli.cjs"
+    "relais": "src/cli.cjs"
   },
   "scripts": {
     "start": "node src/cli.cjs"
@@ -34,7 +34,7 @@
     "commander": "10.0.1"
   },
   "devDependencies": {
-    "esbuild": "^0.19.0",
+    "esbuild": "^0.25.5",
     "pkg": "^5.8.1"
   }
 }
