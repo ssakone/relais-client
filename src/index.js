@@ -15,7 +15,7 @@ const DEFAULT_PROTOCOL = 'http';
 program
   .name('relais-node-client')
   .description('Client Node.js pour le service de tunnel relais')
-  .version('1.1.2');
+  .version('1.2.0');
 
 program
   .command('set-token <token>')
@@ -43,6 +43,8 @@ program
       process.exit(1);
     }
   });
+
+
 
 program
   .command('tunnel')
@@ -89,36 +91,46 @@ program
       remote: options.remote
     });
 
-    // Create failure tracker
+    // Create failure tracker - Agent mode always enabled
     const failureTracker = new ConnectionFailureTracker();
+    console.log('🤖 Mode agent activé - Reconnexion persistante en cas d\'erreur réseau');
 
     while (true) {
       try {
-        // Check if we should stop reconnecting
-        if (failureTracker.shouldStopReconnecting()) {
-          console.error(`Server closed connection ${failureTracker.maxFailuresPerMinute} times within the last minute. Stopping reconnection attempts. Please check your server configuration and try again later.`);
-          process.exit(1);
-        }
+        // Agent mode: Never stop reconnecting for network errors, only for authentication issues
 
         await connectAndServe(options, failureTracker);
+        
+        // Reset failure tracker on successful connection
+        failureTracker.reset();
+        
       } catch (err) {
         if (err.message.includes('Token') || err.message.includes('Authentication')) {
           console.error('Erreur d\'authentification:', err.message);
           process.exit(1);
         }
 
-        // Record the failure when server closes connection
+        // Determine error type and handle accordingly
         if (err.message.includes('Connection closed by server')) {
           console.log(`[DEBUG] Server closed connection detected: "${err.message}"`);
-          failureTracker.recordFailure();
+          failureTracker.recordServerClosure();
           const backoffDuration = failureTracker.getBackoffDuration();
           console.error(`Server closed connection: ${err.message}; reconnecting in ${backoffDuration}ms...`);
           await new Promise(resolve => setTimeout(resolve, backoffDuration));
+        } else if (failureTracker.isNetworkError(err)) {
+          // Network errors - continue trying indefinitely with backoff
+          console.log(`[DEBUG] Network error detected: "${err.message}"`);
+          failureTracker.recordNetworkError();
+          const backoffDuration = failureTracker.getBackoffDuration();
+          console.error(`Network error: ${err.message}; reconnecting in ${backoffDuration}ms...`);
+          await new Promise(resolve => setTimeout(resolve, backoffDuration));
         } else {
-          // For other errors, use fixed delay
+          // Other errors - treat as network errors for agent mode
           console.log(`[DEBUG] Other connection error: "${err.message}"`);
-          console.error('Erreur de connexion:', err.message);
-          await new Promise(resolve => setTimeout(resolve, 5000));
+          failureTracker.recordNetworkError();
+          const backoffDuration = failureTracker.getBackoffDuration();
+          console.error(`Connection error: ${err.message}; reconnecting in ${backoffDuration}ms...`);
+          await new Promise(resolve => setTimeout(resolve, backoffDuration));
         }
       }
     }

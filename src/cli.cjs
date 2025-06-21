@@ -19,7 +19,7 @@ const program = new Command();
 program
   .name('relais')
   .description('Node.js client for the relay tunnel service')
-  .version('1.1.2');
+  .version('1.2.0');
 
 program
   .command('set-token <token>')
@@ -78,16 +78,44 @@ program
       }
     }
 
+    // Import failure tracker for persistent connection
+    const { ConnectionFailureTracker } = await import('./utils/failure-tracker.js');
+    const failureTracker = new ConnectionFailureTracker();
+    console.log('🤖 Mode agent activé - Reconnexion persistante en cas d\'erreur réseau');
+
     while (true) {
       try {
-        await connectAndServe(options);
+        // Agent mode: Never stop reconnecting for network errors, only for authentication issues
+        await connectAndServe(options, failureTracker);
+        
+        // Reset failure tracker on successful connection
+        failureTracker.reset();
+        
       } catch (err) {
         if (err.message.includes('Token')) {
           console.error('This service requires authentication. Use -k <token> or the set-token command');
           process.exit(1);
         }
-        console.error('Connection error:', err.message);
-        await new Promise(resolve => setTimeout(resolve, 5000));
+
+        // Determine error type and handle accordingly
+        if (err.message.includes('Connection closed by server')) {
+          failureTracker.recordServerClosure();
+          const backoffDuration = failureTracker.getBackoffDuration();
+          console.error(`Server closed connection: ${err.message}; reconnecting in ${backoffDuration}ms...`);
+          await new Promise(resolve => setTimeout(resolve, backoffDuration));
+        } else if (failureTracker.isNetworkError(err)) {
+          // Network errors - continue trying indefinitely with backoff
+          failureTracker.recordNetworkError();
+          const backoffDuration = failureTracker.getBackoffDuration();
+          console.error(`Network error: ${err.message}; reconnecting in ${backoffDuration}ms...`);
+          await new Promise(resolve => setTimeout(resolve, backoffDuration));
+        } else {
+          // Other errors - treat as network errors for agent mode
+          failureTracker.recordNetworkError();
+          const backoffDuration = failureTracker.getBackoffDuration();
+          console.error(`Connection error: ${err.message}; reconnecting in ${backoffDuration}ms...`);
+          await new Promise(resolve => setTimeout(resolve, backoffDuration));
+        }
       }
     }
   });

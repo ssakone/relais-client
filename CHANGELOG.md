@@ -1,5 +1,33 @@
 # Changelog
 
+## [1.2.0] - 2025-01-26
+
+### Mode Agent Permanent - Reconnexion Persistante 🤖
+
+#### Changements Majeurs
+- **Mode Agent Toujours Activé** : Le client ne s'arrête plus jamais pour les erreurs réseau
+- **Reconnexion Infinie** : Continue de tenter la connexion indéfiniment en cas d'erreur réseau (EHOSTUNREACH, ETIMEDOUT, etc.)
+- **Classification Intelligente des Erreurs** : Distinction entre erreurs réseau (retry infini) et erreurs serveur/auth (arrêt)
+
+#### Amélioré
+- **Backoff Exponentiel Optimisé** : 1s → 2s → 4s → 8s → 16s → 30s max (au lieu de 100ms → 500ms → 1s → 2s+)
+- **Gestion des Ressources** : Délai maximal de 30s pour éviter une consommation excessive
+- **Reset Automatique** : Réinitialisation du tracker d'échecs lors d'une connexion réussie
+- **Logging Amélioré** : Meilleure catégorisation des erreurs pour le débogage
+
+#### Technique
+- Suppression du système de limitation des reconnexions pour les erreurs réseau
+- Séparation des compteurs : `serverClosures` vs `networkErrors`
+- Méthode `isNetworkError()` pour identifier les erreurs de connectivité
+- Mode agent permanent sans possibilité de désactivation
+
+#### Impact
+- **Parfait pour les agents** : Idéal pour les déploiements où le client doit rester connecté en permanence
+- **Résilience Réseau** : Survit aux pannes réseau, redémarrages serveur, etc.
+- **Maintenance Réduite** : Plus besoin de redémarrer manuellement après des problèmes réseau
+
+---
+
 ## [1.1.2] - 2025-01-26
 
 ### Amélioration de la gestion des connexions et diagnostics 🔧

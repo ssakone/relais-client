@@ -215,22 +215,28 @@ export async function runTunnel(options) {
   
   while (true) {
     try {
-      // Check if we should stop reconnecting
-      if (failureTracker.shouldStopReconnecting()) {
-        console.error(`Server closed connection ${failureTracker.maxFailuresPerMinute} times within the last minute. Stopping reconnection attempts. Please check your server configuration and try again later.`);
-        process.exit(1);
-      }
-
+      // Agent mode: Never stop reconnecting for network errors, only for authentication issues
       await connectAndServe(options, failureTracker);
+      
+      // Reset failure tracker on successful connection
+      failureTracker.reset();
+      
     } catch (err) {
-      // Record failure when server closes connection
+      // Determine error type and handle accordingly
       if (err.message.includes('Connection closed by server')) {
-        failureTracker.recordFailure();
+        failureTracker.recordServerClosure();
         const backoffDuration = failureTracker.getBackoffDuration();
         debug(`Server closed connection: ${err.message}; reconnecting in ${backoffDuration}ms...`);
         await new Promise(resolve => setTimeout(resolve, backoffDuration));
+      } else if (failureTracker.isNetworkError(err)) {
+        // Network errors - continue trying indefinitely with backoff
+        failureTracker.recordNetworkError();
+        const backoffDuration = failureTracker.getBackoffDuration();
+        debug(`Network error: ${err.message}; reconnecting in ${backoffDuration}ms...`);
+        await new Promise(resolve => setTimeout(resolve, backoffDuration));
       } else {
-        // For other errors, use exponential backoff but don't record as closure
+        // Other errors - treat as network errors for agent mode
+        failureTracker.recordNetworkError();
         const backoffDuration = failureTracker.getBackoffDuration();
         debug(`Connection error: ${err.message}; reconnecting in ${backoffDuration}ms...`);
         await new Promise(resolve => setTimeout(resolve, backoffDuration));

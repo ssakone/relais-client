@@ -1,14 +1,14 @@
-# Relais Node.js Client v1.1.2
+# Relais Node.js Client v1.2.0
 
-A Node.js client for the relay tunnel service, allowing you to expose local services to the Internet with enhanced connection stability and intelligent error handling.
+A Node.js client for the relay tunnel service, allowing you to expose local services to the Internet with persistent agent mode for maximum network resilience.
 
-## 🆕 What's New in v1.1.2
+## 🆕 What's New in v1.2.0
 
-- 🛡️ **Smart Reconnection Limits**: Automatically stops after 4 server disconnections in 1 minute
-- ⏱️ **Exponential Backoff**: Progressive delays (100ms → 500ms → 1s → 2s+) between reconnection attempts
-- 🔍 **Token Diagnostics**: New `check-token` command to verify saved tokens
-- 🐧 **Linux Support**: Enhanced Linux compatibility with permission diagnostics via `debug-config`
-- 🔒 **Enhanced Security**: Secure token file permissions (600) and better error handling
+- 🤖 **Agent Mode Always On**: Persistent reconnection for network errors - never gives up!
+- 🔄 **Smart Error Handling**: Distinguishes between network errors (retry forever) and server issues
+- ⏱️ **Improved Backoff**: Exponential backoff (1s → 2s → 4s → 8s → 16s → 30s max) for better resource usage
+- 🛡️ **Network Resilience**: Continues trying indefinitely when network is down or unreachable
+- 🔍 **Enhanced Logging**: Better error categorization and debugging information
 
 ## Installation
 
@@ -78,11 +78,18 @@ relais tunnel -s server:1080 -h localhost -p 3000 -k mytoken -d mysite.example.c
 
 ## 🔧 Technical Improvements
 
-### Connection Management
-- **Smart Failure Tracking**: Stops reconnection after 4 server closures in 1 minute
-- **Exponential Backoff**: Intelligent delay between reconnection attempts
+### Agent Mode & Connection Management
+- **Persistent Agent**: Never stops trying to connect for network errors (EHOSTUNREACH, ETIMEDOUT, etc.)
+- **Smart Error Classification**: Distinguishes network errors from server/authentication issues
+- **Exponential Backoff**: 1s → 2s → 4s → 8s → 16s → 30s max delay between attempts
 - **TCP Keep-Alive**: 60s for stable connections
 - **Heartbeat Monitoring**: 30s interval for connection health
+
+### Network Resilience
+- **Infinite Retry**: Continues attempting connection when network is down
+- **Resource Efficient**: Capped backoff prevents excessive resource usage
+- **Connection Recovery**: Automatically resets failure tracking on successful connection
+- **Error Categorization**: Separate tracking for network vs server errors
 
 ### Token & Configuration
 - **Secure Storage**: Token files with 600 permissions (owner read/write only)
@@ -104,9 +111,9 @@ relais tunnel -s server:1080 -h localhost -p 3000 -k mytoken -d mysite.example.c
 
 ### Connection Issues
 1. Enable verbose logging with `-v` flag
-2. Check if server closes connections repeatedly (client will auto-stop after 4 closures/minute)
-3. Verify your network connectivity
-4. Ensure local service is running on the specified port
+2. Agent mode ensures continuous retry for network issues - no manual intervention needed
+3. Check that your local service is running on the specified port
+4. For persistent connection issues, check server status and authentication
 
 ### Token Issues (Linux)
 1. Run `relais check-token` to verify token status
