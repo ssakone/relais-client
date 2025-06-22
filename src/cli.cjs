@@ -25,7 +25,7 @@ const program = new Command();
 program
   .name('relais')
   .description('Node.js client for the relay tunnel service')
-  .version('1.2.2');
+  .version('1.2.3');
 
 program
   .command('set-token <token>')

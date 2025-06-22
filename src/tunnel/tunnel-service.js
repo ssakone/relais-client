@@ -17,9 +17,12 @@ function createJSONDecoder(socket) {
             const jsonStr = buffer.slice(0, newlineIndex);
             buffer = buffer.slice(newlineIndex + 1);
             try {
-              const message = JSON.parse(jsonStr);
+                          const message = JSON.parse(jsonStr);
+            // Only log non-heartbeat messages to avoid spam
+            if (message.command !== 'HEARTBEAT') {
               debug('JSON message received:', message);
-              resolve(message);
+            }
+            resolve(message);
             } catch (err) {
               reject(new Error('JSON parsing error: ' + err.message));
             }
@@ -169,7 +172,10 @@ export async function connectAndServe(options, failureTracker = null) {
     while (true) {
       try {
         const msg = await decoder.decode();
-        debug('Message received:', msg);
+        // Only log non-heartbeat messages to avoid spam
+        if (msg.command !== 'HEARTBEAT') {
+          debug('Message received:', msg);
+        }
 
         if (msg.command === 'NEWCONN') {
           // Handle new connection asynchronously.
