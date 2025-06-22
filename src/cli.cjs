@@ -10,8 +10,14 @@ const DEFAULT_PROTOCOL = 'http';
 
 let debug = (...args) => {
   if (process.env.DEBUG) {
-    console.log(...args);
+    const timestamp = new Date().toISOString();
+    console.log(`[${timestamp}]`, ...args);
   }
+};
+
+let errorWithTimestamp = (...args) => {
+  const timestamp = new Date().toISOString();
+  console.error(`[${timestamp}]`, ...args);
 };
 
 const program = new Command();
@@ -19,7 +25,7 @@ const program = new Command();
 program
   .name('relais')
   .description('Node.js client for the relay tunnel service')
-  .version('1.2.0');
+  .version('1.2.1');
 
 program
   .command('set-token <token>')
@@ -30,7 +36,7 @@ program
       await saveToken(token);
       console.log('Token saved successfully');
     } catch (err) {
-      console.error('Error saving token:', err.message);
+      errorWithTimestamp('Error saving token:', err.message);
       process.exit(1);
     }
   });
@@ -64,7 +70,7 @@ program
     });
 
     if (!options.port) {
-      console.error('Error: Local port is required');
+      errorWithTimestamp('Error: Local port is required');
       process.exit(1);
     }
 
@@ -93,7 +99,7 @@ program
         
       } catch (err) {
         if (err.message.includes('Token')) {
-          console.error('This service requires authentication. Use -k <token> or the set-token command');
+          errorWithTimestamp('This service requires authentication. Use -k <token> or the set-token command');
           process.exit(1);
         }
 
@@ -101,19 +107,19 @@ program
         if (err.message.includes('Connection closed by server')) {
           failureTracker.recordServerClosure();
           const backoffDuration = failureTracker.getBackoffDuration();
-          console.error(`Server closed connection: ${err.message}; reconnecting in ${backoffDuration}ms...`);
+          errorWithTimestamp(`Server closed connection: ${err.message}; reconnecting in ${backoffDuration}ms...`);
           await new Promise(resolve => setTimeout(resolve, backoffDuration));
         } else if (failureTracker.isNetworkError(err)) {
           // Network errors - continue trying indefinitely with backoff
           failureTracker.recordNetworkError();
           const backoffDuration = failureTracker.getBackoffDuration();
-          console.error(`Network error: ${err.message}; reconnecting in ${backoffDuration}ms...`);
+          errorWithTimestamp(`Network error: ${err.message}; reconnecting in ${backoffDuration}ms...`);
           await new Promise(resolve => setTimeout(resolve, backoffDuration));
         } else {
           // Other errors - treat as network errors for agent mode
           failureTracker.recordNetworkError();
           const backoffDuration = failureTracker.getBackoffDuration();
-          console.error(`Connection error: ${err.message}; reconnecting in ${backoffDuration}ms...`);
+          errorWithTimestamp(`Connection error: ${err.message}; reconnecting in ${backoffDuration}ms...`);
           await new Promise(resolve => setTimeout(resolve, backoffDuration));
         }
       }

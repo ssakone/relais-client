@@ -100,11 +100,6 @@ export async function connectAndServe(options, failureTracker = null) {
         {
           host: serverHost,
           port: parseInt(serverPort),
-          // proxy: {
-          //   host: '162.250.189.217',  // your SOCKS5 proxy host
-          //   port: 4080,         // your SOCKS5 proxy port
-          //   type: 5             // SOCKS version
-          // },
         },
        
         () => {

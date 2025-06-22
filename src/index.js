@@ -4,7 +4,7 @@ import { Command } from 'commander';
 import { saveToken, loadToken, getConfigDir } from './utils/config.js';
 import { connectAndServe } from './tunnel/tunnel-service.js';
 import { ConnectionFailureTracker } from './utils/failure-tracker.js';
-import { debug } from './utils/debug.js';
+import { debug, errorWithTimestamp } from './utils/debug.js';
 
 const program = new Command();
 
@@ -15,7 +15,7 @@ const DEFAULT_PROTOCOL = 'http';
 program
   .name('relais-node-client')
   .description('Client Node.js pour le service de tunnel relais')
-  .version('1.2.0');
+  .version('1.2.1');
 
 program
   .command('set-token <token>')
@@ -25,7 +25,7 @@ program
       await saveToken(token);
       console.log('Token saved successfully');
     } catch (err) {
-      console.error('Error saving token:', err.message);
+      errorWithTimestamp('Error saving token:', err.message);
       process.exit(1);
     }
   });
@@ -39,7 +39,7 @@ program
       console.log('Saved token found:', token.substring(0, 10) + '...' + token.substring(token.length - 4));
       console.log('Token length:', token.length);
     } catch (err) {
-      console.error('No valid token found:', err.message);
+      errorWithTimestamp('No valid token found:', err.message);
       process.exit(1);
     }
   });
@@ -63,7 +63,7 @@ program
     }
 
     if (!options.port) {
-      console.error('Le port local est obligatoire');
+      errorWithTimestamp('Le port local est obligatoire');
       process.exit(1);
     }
 
@@ -78,7 +78,7 @@ program
     }
 
     if (!options.token) {
-      console.error('Le token est obligatoire. Utilisez -k ou sauvegardez un token avec la commande set-token');
+      errorWithTimestamp('Le token est obligatoire. Utilisez -k ou sauvegardez un token avec la commande set-token');
       process.exit(1);
     }
 
@@ -106,7 +106,7 @@ program
         
       } catch (err) {
         if (err.message.includes('Token') || err.message.includes('Authentication')) {
-          console.error('Erreur d\'authentification:', err.message);
+          errorWithTimestamp('Erreur d\'authentification:', err.message);
           process.exit(1);
         }
 
@@ -115,21 +115,21 @@ program
           console.log(`[DEBUG] Server closed connection detected: "${err.message}"`);
           failureTracker.recordServerClosure();
           const backoffDuration = failureTracker.getBackoffDuration();
-          console.error(`Server closed connection: ${err.message}; reconnecting in ${backoffDuration}ms...`);
+          errorWithTimestamp(`Server closed connection: ${err.message}; reconnecting in ${backoffDuration}ms...`);
           await new Promise(resolve => setTimeout(resolve, backoffDuration));
         } else if (failureTracker.isNetworkError(err)) {
           // Network errors - continue trying indefinitely with backoff
           console.log(`[DEBUG] Network error detected: "${err.message}"`);
           failureTracker.recordNetworkError();
           const backoffDuration = failureTracker.getBackoffDuration();
-          console.error(`Network error: ${err.message}; reconnecting in ${backoffDuration}ms...`);
+          errorWithTimestamp(`Network error: ${err.message}; reconnecting in ${backoffDuration}ms...`);
           await new Promise(resolve => setTimeout(resolve, backoffDuration));
         } else {
           // Other errors - treat as network errors for agent mode
           console.log(`[DEBUG] Other connection error: "${err.message}"`);
           failureTracker.recordNetworkError();
           const backoffDuration = failureTracker.getBackoffDuration();
-          console.error(`Connection error: ${err.message}; reconnecting in ${backoffDuration}ms...`);
+          errorWithTimestamp(`Connection error: ${err.message}; reconnecting in ${backoffDuration}ms...`);
           await new Promise(resolve => setTimeout(resolve, backoffDuration));
         }
       }
@@ -191,7 +191,7 @@ program
         console.log('Config directory error:', err.message);
       }
     } catch (err) {
-      console.error('Debug failed:', err.message);
+      errorWithTimestamp('Debug failed:', err.message);
     }
   });
 
