@@ -1,7 +1,7 @@
 import { Socket } from 'net';
 import { TunnelRequest } from '../models/messages.js';
 import { setKeepAlive, setNoDelay, handleNewConnection } from '../network/connection.js';
-import { debug } from '../utils/debug.js';
+import { debug, errorWithTimestamp } from '../utils/debug.js';
 import { ConnectionFailureTracker } from '../utils/failure-tracker.js';
 
 // Utility function to read a complete JSON message from socket
@@ -68,6 +68,8 @@ function createJSONDecoder(socket) {
 // Heartbeat management for keeping connection alive
 function startHeartbeatMonitoring(socket, lastHeartbeatReceived) {
   const heartbeatInterval = 30000; // 30 seconds to detect missing heartbeats
+  const warningInterval = 120000; // 2 minutes before showing warning
+  let warningShown = false;
   
   const checkHeartbeat = setInterval(() => {
     const now = Date.now();
@@ -77,6 +79,11 @@ function startHeartbeatMonitoring(socket, lastHeartbeatReceived) {
       debug(`No heartbeat received for ${timeSinceLastHeartbeat}ms, connection may be dead`);
       clearInterval(checkHeartbeat);
       socket.destroy();
+    } else if (timeSinceLastHeartbeat > warningInterval && !warningShown) {
+      // Show warning after 2 minutes of no heartbeat
+      const lastHeartbeatDate = new Date(lastHeartbeatReceived.value).toISOString();
+      errorWithTimestamp(`⚠️  No heartbeat received for ${Math.round(timeSinceLastHeartbeat/1000)}s (last: ${lastHeartbeatDate}) - server may be down`);
+      warningShown = true;
     }
   }, heartbeatInterval);
   
@@ -84,7 +91,7 @@ function startHeartbeatMonitoring(socket, lastHeartbeatReceived) {
     clearInterval(checkHeartbeat);
   });
   
-  return checkHeartbeat;
+  return { checkHeartbeat, warningShown: () => warningShown, resetWarning: () => { warningShown = false; } };
 }
 
 export async function connectAndServe(options, failureTracker = null) {
@@ -156,7 +163,7 @@ export async function connectAndServe(options, failureTracker = null) {
 
     // Initialize heartbeat monitoring
     const lastHeartbeatReceived = { value: Date.now() };
-    const heartbeatChecker = startHeartbeatMonitoring(ctrlConn, lastHeartbeatReceived);
+    const heartbeatMonitor = startHeartbeatMonitoring(ctrlConn, lastHeartbeatReceived);
 
     // Main loop to receive new connections
     while (true) {
@@ -170,9 +177,17 @@ export async function connectAndServe(options, failureTracker = null) {
             debug('Error handling new connection:', err);
           });
         } else if (msg.command === 'HEARTBEAT') {
+          // Check if we were in warning state before updating timestamp
+          const wasWarningShown = heartbeatMonitor.warningShown();
+          
           // Update last heartbeat timestamp
           lastHeartbeatReceived.value = Date.now();
-          debug('Heartbeat received, connection is alive');
+          
+          // Show success message if we were in warning state
+          if (wasWarningShown) {
+            console.log(`✅ Server is alive again! Heartbeat resumed at ${new Date().toISOString()}`);
+            heartbeatMonitor.resetWarning();
+          }
         } else {
           debug('Unexpected message received:', msg);
         }
