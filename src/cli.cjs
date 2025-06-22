@@ -25,7 +25,7 @@ const program = new Command();
 program
   .name('relais')
   .description('Node.js client for the relay tunnel service')
-  .version('1.2.3');
+  .version('1.3.0');
 
 program
   .command('set-token <token>')
@@ -37,6 +37,82 @@ program
       console.log('Token saved successfully');
     } catch (err) {
       errorWithTimestamp('Error saving token:', err.message);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('deploy [folder]')
+  .description('🚀 Deploy a project folder to Relais platform (experimental)')
+  .option('-t, --type <type>', 'Deployment type (web, api, etc.)', 'web')
+  .option('-v, --verbose', 'Enable detailed logging')
+  .action(async (folder, options) => {
+    if (options.verbose) {
+      process.env.DEBUG = 'true';
+    }
+
+    try {
+      let deployFolder = folder;
+      let deployType = options.type;
+      let isUpdate = false;
+      
+      // Check if relais.json exists to determine if this is an update
+      const { loadDeployConfig, hasDeployConfig } = await import('./utils/deploy-config.js');
+      const configExists = await hasDeployConfig();
+      
+      // If no folder specified, try to load from config
+      if (!deployFolder) {
+        if (configExists) {
+          const config = await loadDeployConfig();
+          if (config) {
+            deployFolder = config.folder;
+            deployType = config.type;
+            isUpdate = true;
+            console.log(`📄 Using saved configuration (UPDATE MODE):`);
+            console.log(`   Folder: ${deployFolder}`);
+            console.log(`   Type: ${deployType}`);
+            console.log(`   Last deployment: ${config.lastDeployed || 'Unknown'}`);
+            console.log('');
+          } else {
+            errorWithTimestamp('No folder specified and no saved configuration found.');
+            console.log('Usage: relais deploy <folder> or save a configuration first.');
+            process.exit(1);
+          }
+        } else {
+          errorWithTimestamp('No folder specified and no saved configuration found.');
+          console.log('Usage: relais deploy <folder> or save a configuration first.');
+          process.exit(1);
+        }
+      } else {
+        // Folder was specified, check if we should update existing config
+        if (configExists) {
+          const config = await loadDeployConfig();
+          if (config && config.folder === deployFolder) {
+            isUpdate = true;
+            console.log('📄 Existing configuration found for this folder - UPDATE MODE');
+          } else {
+            console.log('📄 Existing configuration found but for different folder - CREATE MODE');
+          }
+        }
+      }
+      
+      console.log('Starting deployment...');
+      console.log(`📁 Folder: ${deployFolder}`);
+      console.log(`🏷️  Type: ${deployType}`);
+      console.log(`🔄 Mode: ${isUpdate ? 'UPDATE' : 'CREATE'}`);
+      
+      const { deployService } = await import('./services/deploy.js');
+      const result = await deployService.deploy(deployFolder, deployType, isUpdate);
+      
+      console.log('✅ Upload successful!');
+      console.log('');
+      console.log('🔄 waiting for deployment status');
+      
+      // Poll deployment status after showing upload success
+      await deployService.pollDeploymentStatus(result.id);
+      
+    } catch (error) {
+      errorWithTimestamp('Deployment failed:', error.message);
       process.exit(1);
     }
   });
