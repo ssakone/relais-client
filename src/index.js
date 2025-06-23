@@ -163,12 +163,18 @@ program
           if (config) {
             deployFolder = config.folder;
             deployType = config.type;
-            deployDomain = config.domain;
+            // Only use saved domain if no domain was specified via CLI
+            if (!deployDomain) {
+              deployDomain = config.domain;
+            }
             isUpdate = true;
             console.log(`📄 Using saved configuration (UPDATE MODE):`);
             console.log(`   Folder: ${deployFolder}`);
             console.log(`   Type: ${deployType}`);
-            if (deployDomain) console.log(`   Domain: ${deployDomain}`);
+            console.log(`   Domain: ${deployDomain || 'None'}`);
+            if (options.domain && options.domain !== config.domain) {
+              console.log(`   🔄 Domain changed from: ${config.domain || 'None'} to: ${options.domain}`);
+            }
             console.log(`   Last deployment: ${config.lastDeployed || 'Unknown'}`);
             console.log('');
           } else {
@@ -187,8 +193,14 @@ program
           const config = await loadDeployConfig();
           if (config && config.folder === deployFolder) {
             isUpdate = true;
-            deployDomain = config.domain;
+            // Only use saved domain if no domain was specified via CLI
+            if (!deployDomain) {
+              deployDomain = config.domain;
+            }
             console.log('📄 Existing configuration found for this folder - UPDATE MODE');
+            if (options.domain && options.domain !== config.domain) {
+              console.log(`   🔄 Domain changed from: ${config.domain || 'None'} to: ${options.domain}`);
+            }
           } else {
             console.log('📄 Existing configuration found but for different folder - CREATE MODE');
           }
