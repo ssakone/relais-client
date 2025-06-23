@@ -18,8 +18,9 @@ export class DeployService {
    * @param {string} folderPath - Path to the folder to deploy
    * @param {string} type - Deployment type (default: 'web')
    * @param {boolean} isUpdate - Whether this is an update to existing deployment
+   * @param {string} domain - Custom domain for deployment (optional)
    */
-  async deploy(folderPath, type = 'web', isUpdate = false) {
+  async deploy(folderPath, type = 'web', isUpdate = false, domain = undefined) {
     let zipPath = null;
     
     try {
@@ -41,11 +42,11 @@ export class DeployService {
         }
         
         // Update existing deployment
-        result = await this.updateDeployment(existingConfig.id, zipPath, type);
+        result = await this.updateDeployment(existingConfig.id, zipPath, type, domain);
         console.log('🔄 Updated existing deployment');
       } else {
         // Create new deployment
-        result = await this.uploadToPocketBase(zipPath, type);
+        result = await this.uploadToPocketBase(zipPath, type, domain);
         console.log('🆕 Created new deployment');
       }
       
@@ -55,7 +56,8 @@ export class DeployService {
         folder: folderPath,
         type: type,
         state: 'UPLOADING',
-        file: result.file
+        file: result.file,
+        domain: domain || null
       });
       
       return result;
@@ -140,7 +142,7 @@ export class DeployService {
   /**
    * Upload the zip file to PocketBase
    */
-  async uploadToPocketBase(zipPath, type) {
+  async uploadToPocketBase(zipPath, type, domain) {
     try {
       // Load user token
       const token = await loadToken();
@@ -170,6 +172,7 @@ export class DeployService {
       formData.append('file', fileBlob, zipFileName);
       formData.append('type', type);
       formData.append('token', token);
+      if (domain) formData.append('domain', domain);
       
       debug('Uploading to PocketBase...', {
         url: `${RELAIS_API_URL}/api/collections/deploy_rc/records`,
@@ -178,6 +181,7 @@ export class DeployService {
         fileSize: zipBuffer.length,
         hasToken: !!token,
         token,
+        domain,
       });
       
       const response = await fetch(`${RELAIS_API_URL}/api/collections/deploy_rc/records`, {
@@ -222,8 +226,9 @@ export class DeployService {
    * @param {string} deploymentId - The existing deployment ID
    * @param {string} zipPath - Path to the new zip file
    * @param {string} type - Deployment type
+   * @param {string} domain - Custom domain for deployment (optional)
    */
-  async updateDeployment(deploymentId, zipPath, type) {
+  async updateDeployment(deploymentId, zipPath, type, domain) {
     try {
       // Load user token
       const token = await loadToken();
@@ -253,6 +258,7 @@ export class DeployService {
       formData.append('file', fileBlob, zipFileName);
       formData.append('type', type);
       formData.append('token', token);
+      if (domain) formData.append('domain', domain);
       
       debug('Updating deployment in PocketBase...', {
         url: `${RELAIS_API_URL}/api/collections/deploy_rc/records/${deploymentId}`,
@@ -260,6 +266,7 @@ export class DeployService {
         type,
         fileSize: zipBuffer.length,
         deploymentId,
+        domain,
       });
       
       const response = await fetch(`${RELAIS_API_URL}/api/collections/deploy_rc/records/${deploymentId}`, {

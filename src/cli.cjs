@@ -45,6 +45,7 @@ program
   .command('deploy [folder]')
   .description('🚀 Deploy a project folder to Relais platform (experimental)')
   .option('-t, --type <type>', 'Deployment type (web, api, etc.)', 'web')
+  .option('-d, --domain <domain>', 'Custom domain for deployment')
   .option('-v, --verbose', 'Enable detailed logging')
   .action(async (folder, options) => {
     if (options.verbose) {
@@ -54,6 +55,7 @@ program
     try {
       let deployFolder = folder;
       let deployType = options.type;
+      let deployDomain = options.domain;
       let isUpdate = false;
       
       // Check if relais.json exists to determine if this is an update
@@ -67,10 +69,12 @@ program
           if (config) {
             deployFolder = config.folder;
             deployType = config.type;
+            deployDomain = config.domain;
             isUpdate = true;
             console.log(`📄 Using saved configuration (UPDATE MODE):`);
             console.log(`   Folder: ${deployFolder}`);
             console.log(`   Type: ${deployType}`);
+            console.log(`   Domain: ${deployDomain}`);
             console.log(`   Last deployment: ${config.lastDeployed || 'Unknown'}`);
             console.log('');
           } else {
@@ -89,6 +93,7 @@ program
           const config = await loadDeployConfig();
           if (config && config.folder === deployFolder) {
             isUpdate = true;
+            deployDomain = config.domain;
             console.log('📄 Existing configuration found for this folder - UPDATE MODE');
           } else {
             console.log('📄 Existing configuration found but for different folder - CREATE MODE');
@@ -99,10 +104,11 @@ program
       console.log('Starting deployment...');
       console.log(`📁 Folder: ${deployFolder}`);
       console.log(`🏷️  Type: ${deployType}`);
+      if (deployDomain) console.log(`🌐 Domain: ${deployDomain}`);
       console.log(`🔄 Mode: ${isUpdate ? 'UPDATE' : 'CREATE'}`);
       
       const { deployService } = await import('./services/deploy.js');
-      const result = await deployService.deploy(deployFolder, deployType, isUpdate);
+      const result = await deployService.deploy(deployFolder, deployType, isUpdate, deployDomain);
       
       console.log('✅ Upload successful!');
       console.log('');
