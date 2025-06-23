@@ -9,7 +9,7 @@ import { loadToken } from '../utils/config.js';
 import { saveDeployConfig, updateDeployState, loadDeployConfig } from '../utils/deploy-config.js';
 
 const RELAIS_API_URL = 'https://relais.dev';
-const MAX_FILE_SIZE = 1 * 1024 * 1024; // 1MB in bytes
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB in bytes
 
 export class DeployService {
   
@@ -116,7 +116,9 @@ export class DeployService {
       });
       
       archive.pipe(output);
-      archive.directory(folderPath, folderName);
+      // Add directory contents without the parent folder name
+      // This ensures extracted files are at root level, not in a subfolder
+      archive.directory(folderPath, false);
       archive.finalize();
     });
   }
