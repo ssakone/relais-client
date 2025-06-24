@@ -14,24 +14,24 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB in bytes
 export class DeployService {
   
   /**
-   * Deploy a folder by zipping it and uploading to PocketBase
+   * Deploy a folder by creating a tar.gz archive and uploading to PocketBase
    * @param {string} folderPath - Path to the folder to deploy
    * @param {string} type - Deployment type (default: 'web')
    * @param {boolean} isUpdate - Whether this is an update to existing deployment
    * @param {string} domain - Custom domain for deployment (optional)
    */
   async deploy(folderPath, type = 'web', isUpdate = false, domain = undefined) {
-    let zipPath = null;
+    let archivePath = null;
     
     try {
       // Validate folder exists
       await this.validateFolder(folderPath);
       
-      // Create zip file
-      zipPath = await this.createZip(folderPath);
+      // Create tar.gz file
+      archivePath = await this.createTarGz(folderPath);
       
-      // Validate zip file size
-      await this.validateZipSize(zipPath);
+      // Validate archive file size
+      await this.validateArchiveSize(archivePath);
       
       let result;
       if (isUpdate) {
@@ -42,11 +42,11 @@ export class DeployService {
         }
         
         // Update existing deployment
-        result = await this.updateDeployment(existingConfig.id, zipPath, type, domain);
+        result = await this.updateDeployment(existingConfig.id, archivePath, type, domain);
         console.log('🔄 Updated existing deployment');
       } else {
         // Create new deployment
-        result = await this.uploadToPocketBase(zipPath, type, domain);
+        result = await this.uploadToPocketBase(archivePath, type, domain);
         console.log('🆕 Created new deployment');
       }
       
@@ -66,9 +66,9 @@ export class DeployService {
       errorWithTimestamp('Deploy failed:', error.message);
       throw error;
     } finally {
-      // Always clean up temporary zip file, even if there was an error
-      if (zipPath) {
-        await this.cleanup(zipPath);
+      // Always clean up temporary archive file, even if there was an error
+      if (archivePath) {
+        await this.cleanup(archivePath);
       }
     }
   }
@@ -92,27 +92,31 @@ export class DeployService {
   }
   
   /**
-   * Create a zip file from the specified folder
+   * Create a tar.gz file from the specified folder
    */
-  async createZip(folderPath) {
+  async createTarGz(folderPath) {
     return new Promise((resolve, reject) => {
       const folderName = path.basename(folderPath);
-      const zipPath = path.join(process.cwd(), `${folderName}-${Date.now()}.zip`);
+      const tarGzPath = path.join(process.cwd(), `${folderName}-${Date.now()}.tar.gz`);
       
-      debug('Creating zip file:', zipPath);
+      debug('Creating tar.gz file:', tarGzPath);
       
-      const output = createWriteStream(zipPath);
-      const archive = archiver('zip', {
-        zlib: { level: 9 } // Maximum compression
+      const output = createWriteStream(tarGzPath);
+      const archive = archiver('tar', {
+        gzip: true,
+        gzipOptions: {
+          level: 9, // Maximum compression
+          memLevel: 9
+        }
       });
       
       output.on('close', () => {
-        debug(`Zip created successfully: ${archive.pointer()} bytes`);
-        resolve(zipPath);
+        debug(`Tar.gz created successfully: ${archive.pointer()} bytes`);
+        resolve(tarGzPath);
       });
       
       archive.on('error', (err) => {
-        reject(new Error(`Zip creation failed: ${err.message}`));
+        reject(new Error(`Tar.gz creation failed: ${err.message}`));
       });
       
       archive.pipe(output);
@@ -124,15 +128,15 @@ export class DeployService {
   }
   
   /**
-   * Validate that the zip file doesn't exceed the size limit
+   * Validate that the archive file doesn't exceed the size limit
    */
-  async validateZipSize(zipPath) {
+  async validateArchiveSize(archivePath) {
     try {
-      const stats = await stat(zipPath);
+      const stats = await stat(archivePath);
       const sizeInMB = (stats.size / (1024 * 1024)).toFixed(2);
-      debug(`Zip file size: ${sizeInMB}MB`);
+      debug(`Archive file size: ${sizeInMB}MB`);
       if (stats.size > MAX_FILE_SIZE) {
-        throw new Error(`Zip file too large: ${sizeInMB}MB (max: 1MB)`);
+        throw new Error(`Archive file too large: ${sizeInMB}MB (max: 10MB)`);
       }
     } catch (error) {
       throw new Error(`Size validation failed: ${error.message}`);
@@ -140,45 +144,45 @@ export class DeployService {
   }
   
   /**
-   * Upload the zip file to PocketBase
+   * Upload the tar.gz file to PocketBase
    */
-  async uploadToPocketBase(zipPath, type, domain) {
+  async uploadToPocketBase(archivePath, type, domain) {
     try {
       // Load user token
       const token = await loadToken();
       
-      // Verify zip file exists and read as buffer to avoid stream issues
+      // Verify archive file exists and read as buffer to avoid stream issues
       try {
-        await access(zipPath);
+        await access(archivePath);
       } catch (error) {
-        throw new Error(`Zip file not found: ${zipPath}`);
+        throw new Error(`Archive file not found: ${archivePath}`);
       }
       
-      const zipBuffer = await readFile(zipPath);
-      const zipFileName = path.basename(zipPath);
+      const archiveBuffer = await readFile(archivePath);
+      const archiveFileName = path.basename(archivePath);
       
       // Validate buffer was read successfully
-      if (!zipBuffer || zipBuffer.length === 0) {
-        throw new Error('Zip file is empty or could not be read');
+      if (!archiveBuffer || archiveBuffer.length === 0) {
+        throw new Error('Archive file is empty or could not be read');
       }
       
       // Use native FormData and Blob as recommended by PocketBase maintainer
       const formData = new FormData();
       
       // Convert buffer to Blob for proper multipart handling
-      const fileBlob = new Blob([zipBuffer], { type: 'application/zip' });
+      const fileBlob = new Blob([archiveBuffer], { type: 'application/gzip' });
       
       // Add form fields using native FormData
-      formData.append('file', fileBlob, zipFileName);
+      formData.append('file', fileBlob, archiveFileName);
       formData.append('type', type);
       formData.append('token', token);
       if (domain) formData.append('domain', domain);
       
       debug('Uploading to PocketBase...', {
         url: `${RELAIS_API_URL}/api/collections/deploy_rc/records`,
-        fileName: zipFileName,
+        fileName: archiveFileName,
         type,
-        fileSize: zipBuffer.length,
+        fileSize: archiveBuffer.length,
         hasToken: !!token,
         token,
         domain,
@@ -222,49 +226,49 @@ export class DeployService {
   }
   
   /**
-   * Update an existing deployment with new zip file
+   * Update an existing deployment with new tar.gz file
    * @param {string} deploymentId - The existing deployment ID
-   * @param {string} zipPath - Path to the new zip file
+   * @param {string} archivePath - Path to the new tar.gz file
    * @param {string} type - Deployment type
    * @param {string} domain - Custom domain for deployment (optional)
    */
-  async updateDeployment(deploymentId, zipPath, type, domain) {
+  async updateDeployment(deploymentId, archivePath, type, domain) {
     try {
       // Load user token
       const token = await loadToken();
       
-      // Verify zip file exists and read as buffer
+      // Verify archive file exists and read as buffer
       try {
-        await access(zipPath);
+        await access(archivePath);
       } catch (error) {
-        throw new Error(`Zip file not found: ${zipPath}`);
+        throw new Error(`Archive file not found: ${archivePath}`);
       }
       
-      const zipBuffer = await readFile(zipPath);
-      const zipFileName = path.basename(zipPath);
+      const archiveBuffer = await readFile(archivePath);
+      const archiveFileName = path.basename(archivePath);
       
       // Validate buffer was read successfully
-      if (!zipBuffer || zipBuffer.length === 0) {
-        throw new Error('Zip file is empty or could not be read');
+      if (!archiveBuffer || archiveBuffer.length === 0) {
+        throw new Error('Archive file is empty or could not be read');
       }
       
       // Use native FormData and Blob for update
       const formData = new FormData();
       
       // Convert buffer to Blob for proper multipart handling
-      const fileBlob = new Blob([zipBuffer], { type: 'application/zip' });
+      const fileBlob = new Blob([archiveBuffer], { type: 'application/gzip' });
       
       // Add form fields using native FormData
-      formData.append('file', fileBlob, zipFileName);
+      formData.append('file', fileBlob, archiveFileName);
       formData.append('type', type);
       formData.append('token', token);
       if (domain) formData.append('domain', domain);
       
       debug('Updating deployment in PocketBase...', {
         url: `${RELAIS_API_URL}/api/collections/deploy_rc/records/${deploymentId}`,
-        fileName: zipFileName,
+        fileName: archiveFileName,
         type,
-        fileSize: zipBuffer.length,
+        fileSize: archiveBuffer.length,
         deploymentId,
         domain,
       });
@@ -377,10 +381,10 @@ export class DeployService {
   /**
    * Clean up temporary files
    */
-  async cleanup(zipPath) {
+  async cleanup(archivePath) {
     try {
-      await fs.promises.unlink(zipPath);
-      debug('Temporary zip file cleaned up:', zipPath);
+      await fs.promises.unlink(archivePath);
+      debug('Temporary archive file cleaned up:', archivePath);
     } catch (error) {
       debug('Cleanup warning:', error.message);
       // Don't throw error for cleanup failures
