@@ -110,6 +110,30 @@ program
           process.exit(1);
         }
 
+        // Handle health monitor connection loss specifically
+        if (err.message.includes('Connection lost due to server health check failure')) {
+          errorWithTimestamp('Connexion fermée par le monitoring de santé - Attente du rétablissement...');
+          
+          // Create a temporary health monitor to wait for server recovery
+          const { HealthMonitor } = await import('./utils/health-monitor.js');
+          const tempHealthMonitor = new HealthMonitor();
+          await tempHealthMonitor.waitForServerRecovery();
+          tempHealthMonitor.stop();
+          
+          console.log('🔄 Serveur rétabli - Reprise de la connexion tunnel...');
+          // Continue to reconnect immediately without backoff
+          continue;
+        }
+
+        // Handle tunnel establishment timeout specifically
+        if (err.message.includes('Tunnel establishment timeout')) {
+          const timeoutMatch = err.message.match(/(\d+) seconds/);
+          const timeoutSeconds = timeoutMatch ? timeoutMatch[1] : '30';
+          errorWithTimestamp(`⏱️  Établissement du tunnel trop lent (>${timeoutSeconds}s) - Nouvelle tentative...`);
+          // Immediate retry for timeout, no backoff
+          continue;
+        }
+
         // Determine error type and handle accordingly
         if (err.message.includes('Connection closed by server')) {
           console.log(`[DEBUG] Server closed connection detected: "${err.message}"`);
@@ -226,6 +250,18 @@ program
     } catch (error) {
       errorWithTimestamp('Deployment failed:', error.message);
       process.exit(1);
+    }
+  });
+
+program
+  .command('diagnose')
+  .description('🔍 Diagnostiquer les problèmes de connexion réseau')
+  .action(async () => {
+    try {
+      const { runDiagnostics } = await import('./utils/network-diagnostic.js');
+      await runDiagnostics();
+    } catch (err) {
+      errorWithTimestamp('Erreur lors du diagnostic:', err.message);
     }
   });
 
