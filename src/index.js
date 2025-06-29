@@ -5,6 +5,8 @@ import { saveToken, loadToken, getConfigDir } from './utils/config.js';
 import { connectAndServe } from './tunnel/tunnel-service.js';
 import { ConnectionFailureTracker } from './utils/failure-tracker.js';
 import { debug, errorWithTimestamp } from './utils/debug.js';
+import { deployService } from './services/deploy.js';
+import { loadDeployConfig, hasDeployConfig } from './utils/deploy-config.js';
 
 const program = new Command();
 
@@ -15,7 +17,7 @@ const DEFAULT_PROTOCOL = 'http';
 program
   .name('relais-node-client')
   .description('Client Node.js pour le service de tunnel relais')
-  .version('1.2.3');
+  .version('1.3.0');
 
 program
   .command('set-token <token>')
@@ -43,8 +45,6 @@ program
       process.exit(1);
     }
   });
-
-
 
 program
   .command('tunnel')
@@ -110,6 +110,30 @@ program
           process.exit(1);
         }
 
+        // Handle health monitor connection loss specifically
+        if (err.message.includes('Connection lost due to server health check failure')) {
+          errorWithTimestamp('Connexion fermée par le monitoring de santé - Attente du rétablissement...');
+          
+          // Create a temporary health monitor to wait for server recovery
+          const { HealthMonitor } = await import('./utils/health-monitor.js');
+          const tempHealthMonitor = new HealthMonitor();
+          await tempHealthMonitor.waitForServerRecovery();
+          tempHealthMonitor.stop();
+          
+          console.log('🔄 Serveur rétabli - Reprise de la connexion tunnel...');
+          // Continue to reconnect immediately without backoff
+          continue;
+        }
+
+        // Handle tunnel establishment timeout specifically
+        if (err.message.includes('Tunnel establishment timeout')) {
+          const timeoutMatch = err.message.match(/(\d+) seconds/);
+          const timeoutSeconds = timeoutMatch ? timeoutMatch[1] : '30';
+          errorWithTimestamp(`⏱️  Établissement du tunnel trop lent (>${timeoutSeconds}s) - Nouvelle tentative...`);
+          // Immediate retry for timeout, no backoff
+          continue;
+        }
+
         // Determine error type and handle accordingly
         if (err.message.includes('Connection closed by server')) {
           console.log(`[DEBUG] Server closed connection detected: "${err.message}"`);
@@ -133,6 +157,111 @@ program
           await new Promise(resolve => setTimeout(resolve, backoffDuration));
         }
       }
+    }
+  });
+
+program
+  .command('deploy [folder]')
+  .description('🚀 Deploy a project folder to Relais platform (experimental)')
+  .option('-t, --type <type>', 'Deployment type (web, api, etc.)', 'web')
+  .option('-d, --domain <domain>', 'Custom domain for deployment')
+  .option('-v, --verbose', 'Enable detailed logging')
+  .action(async (folder, options) => {
+    if (options.verbose) {
+      process.env.DEBUG = 'true';
+    }
+
+    try {
+      let deployFolder = folder;
+      let deployType = options.type;
+      let deployDomain = options.domain;
+      let isUpdate = false;
+      
+      // Check if relais.json exists to determine if this is an update
+      const configExists = await hasDeployConfig();
+      
+      // If no folder specified, try to load from config
+      if (!deployFolder) {
+        if (configExists) {
+          const config = await loadDeployConfig();
+          if (config) {
+            deployFolder = config.folder;
+            deployType = config.type;
+            // Only use saved domain if no domain was specified via CLI
+            if (!deployDomain) {
+              deployDomain = config.domain;
+            }
+            isUpdate = true;
+            console.log(`📄 Using saved configuration (UPDATE MODE):`);
+            console.log(`   Folder: ${deployFolder}`);
+            console.log(`   Type: ${deployType}`);
+            console.log(`   Domain: ${deployDomain || 'None'}`);
+            if (options.domain && options.domain !== config.domain) {
+              console.log(`   🔄 Domain changed from: ${config.domain || 'None'} to: ${options.domain}`);
+            }
+            console.log(`   Last deployment: ${config.lastDeployed || 'Unknown'}`);
+            console.log('');
+          } else {
+            errorWithTimestamp('No folder specified and no saved configuration found.');
+            console.log('Usage: relais deploy <folder> or save a configuration first.');
+            process.exit(1);
+          }
+        } else {
+          errorWithTimestamp('No folder specified and no saved configuration found.');
+          console.log('Usage: relais deploy <folder> or save a configuration first.');
+          process.exit(1);
+        }
+      } else {
+        // Folder was specified, check if we should update existing config
+        if (configExists) {
+          const config = await loadDeployConfig();
+          if (config && config.folder === deployFolder) {
+            isUpdate = true;
+            // Only use saved domain if no domain was specified via CLI
+            if (!deployDomain) {
+              deployDomain = config.domain;
+            }
+            console.log('📄 Existing configuration found for this folder - UPDATE MODE');
+            if (options.domain && options.domain !== config.domain) {
+              console.log(`   🔄 Domain changed from: ${config.domain || 'None'} to: ${options.domain}`);
+            }
+          } else {
+            console.log('📄 Existing configuration found but for different folder - CREATE MODE');
+          }
+        }
+      }
+      
+      console.log('Starting deployment...');
+      console.log(`📁 Folder: ${deployFolder}`);
+      console.log(`🏷️  Type: ${deployType}`);
+      if (deployDomain) console.log(`🌐 Domain: ${deployDomain}`);
+      console.log(`🔄 Mode: ${isUpdate ? 'UPDATE' : 'CREATE'}`);
+      
+      const result = await deployService.deploy(deployFolder, deployType, isUpdate, deployDomain);
+      
+      console.log('✅ Upload successful!');
+      console.log('');
+
+      
+      // Poll deployment status after showing upload success
+      await deployService.pollDeploymentStatus(result.id);
+      console.log('')
+      
+    } catch (error) {
+      errorWithTimestamp('Deployment failed:', error.message);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('diagnose')
+  .description('🔍 Diagnostiquer les problèmes de connexion réseau')
+  .action(async () => {
+    try {
+      const { runDiagnostics } = await import('./utils/network-diagnostic.js');
+      await runDiagnostics();
+    } catch (err) {
+      errorWithTimestamp('Erreur lors du diagnostic:', err.message);
     }
   });
 
