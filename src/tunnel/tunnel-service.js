@@ -119,7 +119,7 @@ export async function connectAndServe(options, failureTracker = null) {
           debug(`Connection attempt timed out after ${Date.now() - connectionStartTime}ms`);
           ctrlConn.destroy();
           reject(new Error(`Connection timeout to ${serverHost}:${serverPort}`));
-        }, 10000); // 10 seconds for initial TCP connection
+        }, 15000); // 15 seconds for initial TCP connection (increased for slow server)
         
         // Enable TCP Fast Open if supported
         ctrlConn.setNoDelay(true); // Disable Nagle's algorithm for faster small packets
