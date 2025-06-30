@@ -56,6 +56,7 @@ program
   .option('-d, --domain <domain>', 'Domaine personnalisé')
   .option('-r, --remote <port>', 'Port distant souhaité')
   .option('-t, --type <type>', 'Type de protocole (http ou tcp)', DEFAULT_PROTOCOL)
+  .option('--timeout <seconds>', 'Délai d\'attente pour l\'établissement du tunnel en secondes', '30')
   .option('-v, --verbose', 'Activer les logs détaillés')
   .action(async (options) => {
     if (options.verbose) {
@@ -88,7 +89,8 @@ program
       port: options.port,
       type: options.type,
       domain: options.domain,
-      remote: options.remote
+      remote: options.remote,
+      timeout: options.timeout
     });
 
     // Create failure tracker - Agent mode always enabled
