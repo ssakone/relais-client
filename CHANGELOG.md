@@ -1,5 +1,31 @@
 # Changelog
 
+## [1.2.1] - 2025-06-30
+
+### Nouvelle fonctionnalité - Timeout configurable 🕐
+
+#### Ajouté
+- **Paramètre `--timeout` configurable** : Les utilisateurs peuvent maintenant définir leur propre délai d'attente pour l'établissement du tunnel au lieu d'être limités à 30 secondes
+- **Timeout dynamique** : Le paramètre accepte une valeur en secondes (ex: `--timeout 60` pour 60 secondes)
+- **Valeur par défaut préservée** : Reste 30 secondes si aucune valeur n'est spécifiée
+- **Documentation mise à jour** : Exemples d'utilisation ajoutés dans le README
+
+#### Amélioration
+- **Flexibilité accrue** : Permet d'adapter le timeout selon les conditions réseau (connexions lentes, serveurs éloignés)
+- **Messages d'erreur dynamiques** : Les messages de timeout affichent maintenant la valeur configurée au lieu de "30 seconds"
+- **Support dans les deux CLI** : Disponible dans `src/index.js` (ES modules) et `src/cli.cjs` (CommonJS)
+
+#### Utilisation
+```bash
+# Timeout personnalisé de 60 secondes
+relais tunnel -p 3000 --timeout 60
+
+# Timeout par défaut (30 secondes)
+relais tunnel -p 3000
+```
+
+---
+
 ## [1.2.0] - 2025-01-26
 
 ### Mode Agent Permanent - Reconnexion Persistante 🤖

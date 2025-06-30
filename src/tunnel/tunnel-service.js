@@ -104,8 +104,16 @@ export async function connectAndServe(options, failureTracker = null) {
   // Restart interval for the tunnel (30 minutes)
   const RESTART_INTERVAL_MS = 30 * 60 * 1000;
   
-  // Create a timeout promise for the entire tunnel establishment process (30 seconds)
-  const TUNNEL_ESTABLISHMENT_TIMEOUT = 30000; // 30 seconds
+  // Validate and use user-defined timeout or default to 30 seconds
+  let timeoutSeconds = parseInt(options.timeout);
+  if (isNaN(timeoutSeconds) || timeoutSeconds < 1 || timeoutSeconds > 300) {
+    if (options.timeout && options.timeout !== '30') {
+      debug(`Invalid timeout value: ${options.timeout}, using default of 30 seconds`);
+      errorWithTimestamp(`⚠️  Invalid timeout value: ${options.timeout}. Using default of 30 seconds. Valid range: 1-300 seconds.`);
+    }
+    timeoutSeconds = 30;
+  }
+  const TUNNEL_ESTABLISHMENT_TIMEOUT = timeoutSeconds * 1000;
   
   const establishmentPromise = (async () => {
     // Connect to relay server (control channel)
@@ -204,7 +212,7 @@ export async function connectAndServe(options, failureTracker = null) {
   // Race between establishment and timeout
   const timeoutPromise = new Promise((_, reject) => {
     setTimeout(() => {
-      reject(new Error('Tunnel establishment timeout - took more than 30 seconds'));
+      reject(new Error(`Tunnel establishment timeout - took more than ${timeoutSeconds} seconds`));
     }, TUNNEL_ESTABLISHMENT_TIMEOUT);
   });
 

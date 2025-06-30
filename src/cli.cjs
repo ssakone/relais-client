@@ -145,6 +145,7 @@ program
   .option('-d, --domain <domain>', 'Custom domain')
   .option('-r, --remote <port>', 'Desired remote port')
   .option('-t, --type <type>', 'Protocol type (http or tcp)', DEFAULT_PROTOCOL)
+  .option('--timeout <seconds>', 'Tunnel establishment timeout in seconds', '30')
   .option('-v, --verbose', 'Enable detailed logging')
   .action(async (options) => {
     if (options.verbose) {
@@ -160,7 +161,8 @@ program
       port: options.port,
       type: options.type,
       domain: options.domain,
-      remote: options.remote
+      remote: options.remote,
+      timeout: options.timeout
     });
 
     if (!options.port) {

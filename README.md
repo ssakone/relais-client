@@ -59,6 +59,7 @@ Available options:
 - `-d, --domain <domain>` : Custom domain
 - `-r, --remote <port>` : Desired remote port
 - `-t, --type <type>` : Protocol type (http or tcp) (default: http)
+- `--timeout <seconds>` : Tunnel establishment timeout in seconds (default: 30)
 - `-v, --verbose` : Enable detailed logging
 
 ## Examples
@@ -73,8 +74,11 @@ relais tunnel -p 3000 -d mysite.example.com
 # For a service requiring authentication
 relais tunnel -p 3000 -k mytoken
 
+# With custom timeout (60 seconds instead of default 30)
+relais tunnel -p 3000 --timeout 60
+
 # With all parameters and verbose logging
-relais tunnel -s server:1080 -h localhost -p 3000 -k mytoken -d mysite.example.com -r 8080 -t http -v
+relais tunnel -s server:1080 -h localhost -p 3000 -k mytoken -d mysite.example.com -r 8080 -t http --timeout 60 -v
 ```
 
 ## 🔧 Technical Improvements
