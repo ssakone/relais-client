@@ -100,6 +100,9 @@ function startHeartbeatMonitoring(socket, lastHeartbeatReceived) {
 
 export async function connectAndServe(options, failureTracker = null) {
   debug('Starting tunnel service');
+
+  // Restart interval for the tunnel (30 minutes)
+  const RESTART_INTERVAL_MS = 30 * 60 * 1000;
   
   // Create a timeout promise for the entire tunnel establishment process (30 seconds)
   const TUNNEL_ESTABLISHMENT_TIMEOUT = 30000; // 30 seconds
@@ -208,6 +211,7 @@ export async function connectAndServe(options, failureTracker = null) {
   let ctrlConn, decoder, response;
   let healthMonitor = null;
   let isHealthMonitorConnLost = false;
+  let restartTimer;
   
   try {
     const result = await Promise.race([establishmentPromise, timeoutPromise]);
@@ -249,6 +253,14 @@ export async function connectAndServe(options, failureTracker = null) {
     );
 
     console.log('🏥 Monitoring de santé du serveur activé (vérification toutes les 5s)');
+
+    // Timer to restart the tunnel periodically
+    restartTimer = setTimeout(() => {
+      debug('Restart interval reached - restarting tunnel');
+      if (ctrlConn) {
+        ctrlConn.destroy(new Error('Tunnel restart interval reached'));
+      }
+    }, RESTART_INTERVAL_MS);
 
     // Main loop to receive new connections
     while (true) {
@@ -310,7 +322,12 @@ export async function connectAndServe(options, failureTracker = null) {
       healthMonitor.stop();
       debug('Health monitor stopped');
     }
-    
+
+    // Clear periodic restart timer
+    if (typeof restartTimer !== 'undefined') {
+      clearTimeout(restartTimer);
+    }
+
     if (ctrlConn) {
       try {
         ctrlConn.destroy();
@@ -358,6 +375,13 @@ export async function runTunnel(options) {
         const timeoutSeconds = timeoutMatch ? timeoutMatch[1] : '30';
         errorWithTimestamp(`⏱️  Établissement du tunnel trop lent (>${timeoutSeconds}s) - Nouvelle tentative...`);
         // Immediate retry for timeout, no backoff
+        continue;
+      }
+
+      // Handle periodic restart without backoff
+      if (err.message.includes('Tunnel restart interval reached')) {
+        console.log('🔄 Redémarrage périodique du tunnel');
+        failureTracker.reset();
         continue;
       }
       

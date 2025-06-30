@@ -9,6 +9,7 @@ A Node.js client for the relay tunnel service, allowing you to expose local serv
 - ⏱️ **Improved Backoff**: Exponential backoff (1s → 2s → 4s → 8s → 16s → 30s max) for better resource usage
 - 🛡️ **Network Resilience**: Continues trying indefinitely when network is down or unreachable
 - 🔍 **Enhanced Logging**: Better error categorization and debugging information
+- ⏰ **Periodic Restart**: Automatically restarts the tunnel every 30 minutes for a fresh connection
 
 ## Installation
 
