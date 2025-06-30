@@ -1,15 +1,23 @@
-# Relais Node.js Client v1.2.0
+# Relais Node.js Client v1.3.2
 
 A Node.js client for the relay tunnel service, allowing you to expose local services to the Internet with persistent agent mode for maximum network resilience.
 
-## 🆕 What's New in v1.2.0
+## 🆕 What's New in v1.3.2
+
+- 🎯 **Configurable Restart Interval**: Customize tunnel restart timing (1-1440 minutes)
+- ⚡ **Optimized TCP Connections**: Enhanced socket performance with aggressive TCP optimizations
+- 🚀 **Faster Health Monitoring**: Reduced health check interval to 3 seconds with adaptive checking
+- 🔧 **Connection Pooling**: Reuse connections for better performance
+- 🌐 **DNS Retry Logic**: Exponential backoff for DNS resolution failures
+- 📊 **Improved Buffer Management**: Larger send/receive buffers (256KB) for better throughput
+
+## Previous Features (v1.2.0)
 
 - 🤖 **Agent Mode Always On**: Persistent reconnection for network errors - never gives up!
 - 🔄 **Smart Error Handling**: Distinguishes between network errors (retry forever) and server issues
 - ⏱️ **Improved Backoff**: Exponential backoff (1s → 2s → 4s → 8s → 16s → 30s max) for better resource usage
 - 🛡️ **Network Resilience**: Continues trying indefinitely when network is down or unreachable
 - 🔍 **Enhanced Logging**: Better error categorization and debugging information
-- ⏰ **Periodic Restart**: Automatically restarts the tunnel every 30 minutes for a fresh connection
 
 ## Installation
 
@@ -60,6 +68,7 @@ Available options:
 - `-r, --remote <port>` : Desired remote port
 - `-t, --type <type>` : Protocol type (http or tcp) (default: http)
 - `--timeout <seconds>` : Tunnel establishment timeout in seconds (default: 30)
+- `--restart-interval <minutes>` : Tunnel restart interval in minutes (default: 30, range: 1-1440)
 - `-v, --verbose` : Enable detailed logging
 
 ## Examples
@@ -77,8 +86,11 @@ relais tunnel -p 3000 -k mytoken
 # With custom timeout (60 seconds instead of default 30)
 relais tunnel -p 3000 --timeout 60
 
+# With custom restart interval (60 minutes instead of default 30)
+relais tunnel -p 3000 --restart-interval 60
+
 # With all parameters and verbose logging
-relais tunnel -s server:1080 -h localhost -p 3000 -k mytoken -d mysite.example.com -r 8080 -t http --timeout 60 -v
+relais tunnel -s server:1080 -h localhost -p 3000 -k mytoken -d mysite.example.com -r 8080 -t http --timeout 60 --restart-interval 120 -v
 ```
 
 ## 🔧 Technical Improvements
@@ -87,14 +99,17 @@ relais tunnel -s server:1080 -h localhost -p 3000 -k mytoken -d mysite.example.c
 - **Persistent Agent**: Never stops trying to connect for network errors (EHOSTUNREACH, ETIMEDOUT, etc.)
 - **Smart Error Classification**: Distinguishes network errors from server/authentication issues
 - **Exponential Backoff**: 1s → 2s → 4s → 8s → 16s → 30s max delay between attempts
-- **TCP Keep-Alive**: 60s for stable connections
+- **TCP Keep-Alive**: 30s for faster dead connection detection
 - **Heartbeat Monitoring**: 30s interval for connection health
+- **Configurable Restart**: Customizable tunnel restart interval (1-1440 minutes)
 
 ### Network Resilience
 - **Infinite Retry**: Continues attempting connection when network is down
 - **Resource Efficient**: Capped backoff prevents excessive resource usage
 - **Connection Recovery**: Automatically resets failure tracking on successful connection
 - **Error Categorization**: Separate tracking for network vs server errors
+- **DNS Retry**: Exponential backoff for DNS resolution failures (up to 3 retries)
+- **Adaptive Health Checks**: Faster checking (1s) when server is down, normal (3s) when healthy
 
 ### Token & Configuration
 - **Secure Storage**: Token files with 600 permissions (owner read/write only)

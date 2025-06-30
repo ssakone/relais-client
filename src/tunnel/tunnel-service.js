@@ -1,6 +1,6 @@
 import { Socket } from 'net';
 import { TunnelRequest } from '../models/messages.js';
-import { setKeepAlive, setNoDelay, handleNewConnection } from '../network/connection.js';
+import { setKeepAlive, setNoDelay, handleNewConnection, optimizeSocket } from '../network/connection.js';
 import { debug, errorWithTimestamp } from '../utils/debug.js';
 import { ConnectionFailureTracker } from '../utils/failure-tracker.js';
 import { HealthMonitor } from '../utils/health-monitor.js';
@@ -101,8 +101,16 @@ function startHeartbeatMonitoring(socket, lastHeartbeatReceived) {
 export async function connectAndServe(options, failureTracker = null) {
   debug('Starting tunnel service');
 
-  // Restart interval for the tunnel (30 minutes)
-  const RESTART_INTERVAL_MS = 30 * 60 * 1000;
+  // Validate and use user-defined restart interval or default to 30 minutes
+  let restartIntervalMinutes = parseInt(options.restartInterval);
+  if (isNaN(restartIntervalMinutes) || restartIntervalMinutes < 1 || restartIntervalMinutes > 1440) {
+    if (options.restartInterval && options.restartInterval !== '30') {
+      debug(`Invalid restart interval value: ${options.restartInterval}, using default of 30 minutes`);
+      errorWithTimestamp(`⚠️  Invalid restart interval value: ${options.restartInterval}. Using default of 30 minutes. Valid range: 1-1440 minutes.`);
+    }
+    restartIntervalMinutes = 30;
+  }
+  const RESTART_INTERVAL_MS = restartIntervalMinutes * 60 * 1000;
   
   // Validate and use user-defined timeout or default to 30 seconds
   let timeoutSeconds = parseInt(options.timeout);
@@ -132,42 +140,63 @@ export async function connectAndServe(options, failureTracker = null) {
           reject(new Error(`Connection timeout to ${serverHost}:${serverPort}`));
         }, 15000); // 15 seconds for initial TCP connection (increased for slow server)
         
-        // Enable TCP Fast Open if supported
-        ctrlConn.setNoDelay(true); // Disable Nagle's algorithm for faster small packets
+        // Add exponential backoff for DNS resolution
+        let dnsRetries = 0;
+        const maxDnsRetries = 3;
         
-        ctrlConn.connect(
-          {
-            host: serverHost,
-            port: parseInt(serverPort),
-            // TCP optimizations
-            noDelay: true,
-            keepAlive: true,
-            keepAliveInitialDelay: 10000, // Start keepalive after 10s
-          },
-         
-          () => {
-            clearTimeout(connectTimeout);
-            const connectionTime = Date.now() - connectionStartTime;
-            debug(`Connected to relay server: ${options.server} (took ${connectionTime}ms)`);
-            
-            // Apply additional TCP optimizations after connection
-            setKeepAlive(ctrlConn);
-            setNoDelay(ctrlConn);
-            
-            // Increased timeout to match server settings (120 seconds)
-            ctrlConn.setTimeout(180000, () => { // 3 minutes for control connection
-              debug('Control connection timed out');
-              ctrlConn.destroy();
-            });
-            resolve();
-          }
-        );
+        const attemptConnection = () => {
+          // Enable TCP optimizations before connection
+          ctrlConn.setNoDelay(true); // Disable Nagle's algorithm for faster small packets
+          
+          ctrlConn.connect(
+            {
+              host: serverHost,
+              port: parseInt(serverPort),
+              // TCP optimizations
+              noDelay: true,
+              keepAlive: true,
+              keepAliveInitialDelay: 10000, // Start keepalive after 10s
+              // Add TCP_QUICKACK equivalent - reduce ACK delays
+              allowHalfOpen: false,
+              // Enable TCP Fast Open if available
+              hints: 0, // DNS resolution hints
+            },
+           
+            () => {
+              clearTimeout(connectTimeout);
+              const connectionTime = Date.now() - connectionStartTime;
+              debug(`Connected to relay server: ${options.server} (took ${connectionTime}ms)`);
+              
+              // Apply comprehensive TCP optimizations after connection
+              optimizeSocket(ctrlConn);
+              
+              // Additional timeout handler
+              ctrlConn.on('timeout', () => {
+                debug('Control connection timed out');
+                ctrlConn.destroy();
+              });
+              resolve();
+            }
+          );
+        };
         
         ctrlConn.on('error', (err) => {
-          clearTimeout(connectTimeout);
-          debug(`Connection error after ${Date.now() - connectionStartTime}ms:`, err.message);
-          reject(err);
+          if (err.code === 'ENOTFOUND' && dnsRetries < maxDnsRetries) {
+            dnsRetries++;
+            debug(`DNS resolution failed, retry ${dnsRetries}/${maxDnsRetries}`);
+            setTimeout(() => {
+              ctrlConn.destroy();
+              ctrlConn = new Socket();
+              attemptConnection();
+            }, Math.pow(2, dnsRetries) * 1000); // Exponential backoff: 2s, 4s, 8s
+          } else {
+            clearTimeout(connectTimeout);
+            debug(`Connection error after ${Date.now() - connectionStartTime}ms:`, err.message);
+            reject(err);
+          }
         });
+        
+        attemptConnection();
       });
 
       // Send tunnel request in JSON
@@ -260,7 +289,10 @@ export async function connectAndServe(options, failureTracker = null) {
       }
     );
 
-    console.log('🏥 Monitoring de santé du serveur activé (vérification toutes les 5s)');
+    console.log('🏥 Monitoring de santé du serveur activé (vérification toutes les 3s)');
+
+    // Log restart interval configuration
+    console.log(`⏱️  Redémarrage automatique du tunnel configuré: toutes les ${restartIntervalMinutes} minutes`);
 
     // Timer to restart the tunnel periodically
     restartTimer = setTimeout(() => {

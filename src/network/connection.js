@@ -1,6 +1,37 @@
 import { Socket } from 'net';
 import { debug } from '../utils/debug.js';
 
+/**
+ * Apply comprehensive TCP optimizations to a socket
+ * @param {Socket} socket - The socket to optimize
+ */
+export function optimizeSocket(socket) {
+  // Disable Nagle's algorithm for lower latency
+  socket.setNoDelay(true);
+  
+  // Enable TCP keepalive with aggressive settings
+  socket.setKeepAlive(true, 30000); // 30 seconds
+  
+  // Set socket timeout to detect dead connections faster
+  socket.setTimeout(180000); // 3 minutes
+  
+  // Additional optimizations if available
+  if (socket.ref) socket.ref(); // Keep process alive
+  
+  // Try to set socket buffer sizes for better throughput
+  try {
+    // Increase send/receive buffer sizes
+    if (socket._handle && socket._handle.setSendBufferSize) {
+      socket._handle.setSendBufferSize(256 * 1024); // 256KB
+      socket._handle.setRecvBufferSize(256 * 1024); // 256KB
+    }
+  } catch (err) {
+    // Ignore if not supported
+  }
+  
+  debug('Socket optimizations applied');
+}
+
 export function setKeepAlive(socket) {
   // Increased to 60 seconds to match server settings
   socket.setKeepAlive(true, 60000);
@@ -58,10 +89,8 @@ export async function handleNewConnection(options, response) {
         },
         () => {
           debug('Connected to data port:', response.data_addr);
-          setKeepAlive(dataConn);
-          setNoDelay(dataConn);
-          // Increased timeout to match server settings (120 seconds)
-          dataConn.setTimeout(120000, () => {
+          optimizeSocket(dataConn);
+          dataConn.on('timeout', () => {
             debug('Data connection timed out');
             dataConn.destroy();
           });
@@ -86,10 +115,8 @@ export async function handleNewConnection(options, response) {
         },
         () => {
           debug('Connected to local service:', `${options.host}:${options.port}`);
-          setKeepAlive(localConn);
-          setNoDelay(localConn);
-          // Increased timeout to match server settings (120 seconds)
-          localConn.setTimeout(120000, () => {
+          optimizeSocket(localConn);
+          localConn.on('timeout', () => {
             debug('Local connection timed out');
             localConn.destroy();
           });
