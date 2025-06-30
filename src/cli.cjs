@@ -197,6 +197,12 @@ program
           process.exit(1);
         }
 
+        if (err.message.includes('Tunnel restart interval reached')) {
+          console.log('🔄 Periodic tunnel restart');
+          failureTracker.reset();
+          continue;
+        }
+
         // Determine error type and handle accordingly
         if (err.message.includes('Connection closed by server')) {
           failureTracker.recordServerClosure();

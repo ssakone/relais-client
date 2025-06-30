@@ -134,6 +134,12 @@ program
           continue;
         }
 
+        if (err.message.includes('Tunnel restart interval reached')) {
+          console.log('🔄 Redémarrage périodique du tunnel');
+          failureTracker.reset();
+          continue;
+        }
+
         // Determine error type and handle accordingly
         if (err.message.includes('Connection closed by server')) {
           console.log(`[DEBUG] Server closed connection detected: "${err.message}"`);
