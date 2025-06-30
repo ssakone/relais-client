@@ -55,15 +55,26 @@ function createJSONDecoder(socket) {
           reject(new Error('Connection closed by server'));
         }
 
+        // Handle the case where we destroy the socket locally (e.g. for a
+        // scheduled restart). In that situation Node émet l'évènement "close"
+        // mais pas forcément "end" ; sans ce listener le decode() pourrait
+        // rester bloqué indéfiniment.
+        function onClose() {
+          cleanup();
+          reject(new Error('Connection closed by server'));
+        }
+
         function cleanup() {
           socket.removeListener('data', onData);
           socket.removeListener('error', onError);
           socket.removeListener('end', onEnd);
+          socket.removeListener('close', onClose);
         }
 
         socket.on('data', onData);
         socket.on('error', onError);
         socket.on('end', onEnd);
+        socket.on('close', onClose);
       });
     },
   };
@@ -123,13 +134,25 @@ export async function connectAndServe(options, failureTracker = null) {
   }
   const TUNNEL_ESTABLISHMENT_TIMEOUT = timeoutSeconds * 1000;
   
+  // Extract host from server option for failover logic
+  const [serverHost, primaryPort] = options.server.split(':');
+  const primaryServer = `${serverHost}:${primaryPort || '1080'}`;
+  const secondaryServer = `${serverHost}:1081`;
+  
+  // Check if we should use secondary server due to primary failures
+  let currentServer = primaryServer;
+  if (failureTracker && failureTracker.shouldUseSecondaryServer && failureTracker.shouldUseSecondaryServer()) {
+    currentServer = secondaryServer;
+    debug('Using secondary server due to primary server failures');
+  }
+  
   const establishmentPromise = (async () => {
     // Connect to relay server (control channel)
     const ctrlConn = new Socket();
-    const [serverHost, serverPort] = options.server.split(':');
+    const [connHost, connPort] = currentServer.split(':');
 
     try {
-      debug(`Attempting TCP connection to ${serverHost}:${serverPort}`);
+      debug(`Attempting TCP connection to ${connHost}:${connPort}`);
       const connectionStartTime = Date.now();
       
       await new Promise((resolve, reject) => {
@@ -137,7 +160,7 @@ export async function connectAndServe(options, failureTracker = null) {
         const connectTimeout = setTimeout(() => {
           debug(`Connection attempt timed out after ${Date.now() - connectionStartTime}ms`);
           ctrlConn.destroy();
-          reject(new Error(`Connection timeout to ${serverHost}:${serverPort}`));
+          reject(new Error(`Connection timeout to ${connHost}:${connPort}`));
         }, 15000); // 15 seconds for initial TCP connection (increased for slow server)
         
         // Add exponential backoff for DNS resolution
@@ -150,8 +173,8 @@ export async function connectAndServe(options, failureTracker = null) {
           
           ctrlConn.connect(
             {
-              host: serverHost,
-              port: parseInt(serverPort),
+              host: connHost,
+              port: parseInt(connPort),
               // TCP optimizations
               noDelay: true,
               keepAlive: true,
@@ -165,7 +188,7 @@ export async function connectAndServe(options, failureTracker = null) {
             () => {
               clearTimeout(connectTimeout);
               const connectionTime = Date.now() - connectionStartTime;
-              debug(`Connected to relay server: ${options.server} (took ${connectionTime}ms)`);
+              debug(`Connected to relay server: ${currentServer} (took ${connectionTime}ms)`);
               
               // Apply comprehensive TCP optimizations after connection
               optimizeSocket(ctrlConn);
@@ -260,10 +283,12 @@ export async function connectAndServe(options, failureTracker = null) {
     const publicAddr = response.public_addr;
     if (options.type === 'http') {
       console.log('🚀 Tunnel active! Accessible via:', 'https://' + publicAddr.split(':')[0]);
+      console.log(`🔗 Connected to server: ${currentServer}`);
     } else {
-      const serverHost = options.server.split(':')[0];
+      const connHost = currentServer.split(':')[0];
       const publicPort = publicAddr.split(':')[1];
-      console.log('🚀 Tunnel active! Accessible via:', `tcp://${serverHost}:${publicPort}`);
+      console.log('🚀 Tunnel active! Accessible via:', `tcp://${connHost}:${publicPort}`);
+      console.log(`🔗 Connected to server: ${currentServer}`);
     }
 
     // Initialize heartbeat monitoring
@@ -294,11 +319,21 @@ export async function connectAndServe(options, failureTracker = null) {
     // Log restart interval configuration
     console.log(`⏱️  Redémarrage automatique du tunnel configuré: toutes les ${restartIntervalMinutes} minutes`);
 
+    // Flag to indicate that the periodic restart timer has fired.
+    let restartTriggered = false;
+
     // Timer to restart the tunnel periodically
     restartTimer = setTimeout(() => {
       debug('Restart interval reached - restarting tunnel');
+      restartTriggered = true;
+
+      // Destroying the socket will eventually reject any pending decoder.decode()
+      // call, but if the timer fires in the short gap **between** two decode()
+      // invocations there might be no active error/end listener yet. Keeping this
+      // flag allows the main loop to notice the restart request immediately on
+      // the next iteration so we never miss a scheduled restart.
       if (ctrlConn) {
-        ctrlConn.destroy(new Error('Tunnel restart interval reached'));
+        ctrlConn.destroy();
       }
     }, RESTART_INTERVAL_MS);
 
@@ -309,6 +344,13 @@ export async function connectAndServe(options, failureTracker = null) {
         // Only log non-heartbeat messages to avoid spam
         if (msg.command !== 'HEARTBEAT') {
           debug('Message received:', msg);
+        }
+
+        // If the restart timer fired while we were waiting for a message, bail
+        // out right away so that the upper reconnect-loop can spin up a fresh
+        // tunnel without any back-off.
+        if (restartTriggered) {
+          throw new Error('Tunnel restart interval reached');
         }
 
         if (msg.command === 'NEWCONN') {
@@ -332,6 +374,12 @@ export async function connectAndServe(options, failureTracker = null) {
           debug('Unexpected message received:', msg);
         }
       } catch (err) {
+        // If we already know that a periodic restart was requested, propagate a
+        // dedicated error so that the outer loop can react without delay.
+        if (restartTriggered) {
+          throw new Error('Tunnel restart interval reached');
+        }
+
         // If the connection is closed by the server, this is where we track it
         if (err.message === 'Connection closed by server') {
           // Don't record failure here - let the caller handle it

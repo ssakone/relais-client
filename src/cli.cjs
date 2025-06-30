@@ -194,6 +194,7 @@ program
         
         // Reset failure tracker on successful connection
         failureTracker.reset();
+        failureTracker.recordSuccessfulConnection();
         
       } catch (err) {
         if (err.message.includes('Token') || err.message.includes('Authentication')) {
@@ -221,6 +222,12 @@ program
           const timeoutMatch = err.message.match(/(\d+) seconds/);
           const timeoutSeconds = timeoutMatch ? timeoutMatch[1] : '30';
           errorWithTimestamp(`⏱️  Établissement du tunnel trop lent (>${timeoutSeconds}s) - Nouvelle tentative...`);
+          
+          // Record primary server failure for potential failover
+          if (!failureTracker.shouldUseSecondaryServer()) {
+            failureTracker.recordPrimaryServerFailure();
+          }
+          
           // Immediate retry for timeout, no backoff
           continue;
         }
@@ -240,12 +247,24 @@ program
         } else if (failureTracker.isNetworkError(err)) {
           // Network errors - continue trying indefinitely with backoff
           failureTracker.recordNetworkError();
+          
+          // Record primary server failure for potential failover
+          if (!failureTracker.shouldUseSecondaryServer()) {
+            failureTracker.recordPrimaryServerFailure();
+          }
+          
           const backoffDuration = failureTracker.getBackoffDuration();
           errorWithTimestamp(`Network error: ${err.message}; reconnecting in ${backoffDuration}ms...`);
           await new Promise(resolve => setTimeout(resolve, backoffDuration));
         } else {
           // Other errors - treat as network errors for agent mode
           failureTracker.recordNetworkError();
+          
+          // Record primary server failure for potential failover
+          if (!failureTracker.shouldUseSecondaryServer()) {
+            failureTracker.recordPrimaryServerFailure();
+          }
+          
           const backoffDuration = failureTracker.getBackoffDuration();
           errorWithTimestamp(`Connection error: ${err.message}; reconnecting in ${backoffDuration}ms...`);
           await new Promise(resolve => setTimeout(resolve, backoffDuration));

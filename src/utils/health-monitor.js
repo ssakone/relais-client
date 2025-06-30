@@ -109,7 +109,7 @@ export class HealthMonitor {
                               jsonResponse.message && 
                               jsonResponse.message.includes('healthy');
               
-              debug(`Health check response: ${response.statusCode}, healthy: ${isHealthy}`);
+              // debug(`Health check response: ${response.statusCode}, healthy: ${isHealthy}`);
               resolve(isHealthy);
             } else {
               debug(`Health check failed with status: ${response.statusCode}`);
