@@ -1,6 +1,6 @@
 {
   "name": "relais",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "description": "Node.js client for the relay tunnel service - Agent mode with persistent reconnection for network resilience",
   "main": "src/cli.cjs",
   "type": "module",
