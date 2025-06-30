@@ -9,8 +9,9 @@ import { debug, errorWithTimestamp } from './debug.js';
 export class HealthMonitor {
   constructor(healthUrl = 'https://relais.dev/api/health') {
     this.healthUrl = healthUrl;
-    this.checkInterval = 5000; // Vérifie toutes les 5 secondes
-    this.failureThreshold = 30000; // 30 secondes de pannes consécutives
+    this.checkInterval = 3000; // Check every 3 seconds for faster detection
+    this.checkIntervalWhenDown = 1000; // Check every second when down
+    this.failureThreshold = 15000; // 15 seconds of consecutive failures
     this.isRunning = false;
     this.lastSuccessTime = Date.now();
     this.consecutiveFailures = 0;
@@ -40,9 +41,8 @@ export class HealthMonitor {
 
     debug('Starting health monitor...', this.healthUrl);
     
-    this.intervalId = setInterval(() => {
-      this.performHealthCheck();
-    }, this.checkInterval);
+    // Start with normal interval
+    this.scheduleNextCheck(this.checkInterval);
 
     // Effectuer une vérification immédiate
     this.performHealthCheck();
@@ -58,7 +58,7 @@ export class HealthMonitor {
 
     this.isRunning = false;
     if (this.intervalId) {
-      clearInterval(this.intervalId);
+      clearTimeout(this.intervalId);
       this.intervalId = null;
     }
     debug('Health monitor stopped');
@@ -152,6 +152,9 @@ export class HealthMonitor {
         this.onConnectionRestored();
       }
     }
+    
+    // Schedule next check with normal interval
+    this.scheduleNextCheck(this.checkInterval);
   }
 
   /**
@@ -176,10 +179,14 @@ export class HealthMonitor {
       }
     } else if (this.currentlyDown) {
       // Toujours en panne, afficher un message périodique
-      if (this.consecutiveFailures % 6 === 0) { // Toutes les 30 secondes (6 * 5s)
+      if (this.consecutiveFailures % 10 === 0) { // Every 10 seconds when checking every second
         errorWithTimestamp(`⏳ Serveur toujours inaccessible depuis ${Math.round(timeSinceLastSuccess/1000)}s - En attente de rétablissement...`);
       }
     }
+    
+    // Schedule next check with faster interval when down
+    const nextInterval = this.currentlyDown ? this.checkIntervalWhenDown : this.checkInterval;
+    this.scheduleNextCheck(nextInterval);
   }
 
   /**
@@ -219,5 +226,24 @@ export class HealthMonitor {
       timeSinceLastSuccess: Date.now() - this.lastSuccessTime,
       consecutiveFailures: this.consecutiveFailures
     };
+  }
+
+  /**
+   * Schedule the next health check with adaptive interval
+   */
+  scheduleNextCheck(interval) {
+    if (this.intervalId) {
+      clearTimeout(this.intervalId);
+    }
+    
+    if (!this.isRunning) {
+      return;
+    }
+    
+    this.intervalId = setTimeout(() => {
+      if (this.isRunning) {
+        this.performHealthCheck();
+      }
+    }, interval);
   }
 } 

@@ -17,7 +17,7 @@ const DEFAULT_PROTOCOL = 'http';
 program
   .name('relais-node-client')
   .description('Client Node.js pour le service de tunnel relais')
-  .version('1.3.1');
+  .version('1.3.2');
 
 program
   .command('set-token <token>')
@@ -57,6 +57,7 @@ program
   .option('-r, --remote <port>', 'Port distant souhaité')
   .option('-t, --type <type>', 'Type de protocole (http ou tcp)', DEFAULT_PROTOCOL)
   .option('--timeout <seconds>', 'Délai d\'attente pour l\'établissement du tunnel en secondes', '30')
+  .option('--restart-interval <minutes>', 'Intervalle de redémarrage du tunnel en minutes', '30')
   .option('-v, --verbose', 'Activer les logs détaillés')
   .action(async (options) => {
     if (options.verbose) {
@@ -90,7 +91,8 @@ program
       type: options.type,
       domain: options.domain,
       remote: options.remote,
-      timeout: options.timeout
+      timeout: options.timeout,
+      restartInterval: options.restartInterval
     });
 
     // Create failure tracker - Agent mode always enabled
