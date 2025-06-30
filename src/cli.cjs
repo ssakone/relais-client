@@ -25,7 +25,7 @@ const program = new Command();
 program
   .name('relais')
   .description('Node.js client for the relay tunnel service')
-  .version('1.3.1');
+  .version('1.3.2');
 
 program
   .command('set-token <token>')
@@ -146,6 +146,7 @@ program
   .option('-r, --remote <port>', 'Desired remote port')
   .option('-t, --type <type>', 'Protocol type (http or tcp)', DEFAULT_PROTOCOL)
   .option('--timeout <seconds>', 'Tunnel establishment timeout in seconds', '30')
+  .option('--restart-interval <minutes>', 'Tunnel restart interval in minutes', '30')
   .option('-v, --verbose', 'Enable detailed logging')
   .action(async (options) => {
     if (options.verbose) {
@@ -162,7 +163,8 @@ program
       type: options.type,
       domain: options.domain,
       remote: options.remote,
-      timeout: options.timeout
+      timeout: options.timeout,
+      restartInterval: options.restartInterval
     });
 
     if (!options.port) {
@@ -194,13 +196,37 @@ program
         failureTracker.reset();
         
       } catch (err) {
-        if (err.message.includes('Token')) {
+        if (err.message.includes('Token') || err.message.includes('Authentication')) {
           errorWithTimestamp('This service requires authentication. Use -k <token> or the set-token command');
           process.exit(1);
         }
 
+        // Handle health monitor connection loss specifically
+        if (err.message.includes('Connection lost due to server health check failure')) {
+          errorWithTimestamp('Connexion fermée par le monitoring de santé - Attente du rétablissement...');
+          
+          // Create a temporary health monitor to wait for server recovery
+          const { HealthMonitor } = await import('./utils/health-monitor.js');
+          const tempHealthMonitor = new HealthMonitor();
+          await tempHealthMonitor.waitForServerRecovery();
+          tempHealthMonitor.stop();
+          
+          console.log('🔄 Serveur rétabli - Reprise de la connexion tunnel...');
+          // Continue to reconnect immediately without backoff
+          continue;
+        }
+
+        // Handle tunnel establishment timeout specifically
+        if (err.message.includes('Tunnel establishment timeout')) {
+          const timeoutMatch = err.message.match(/(\d+) seconds/);
+          const timeoutSeconds = timeoutMatch ? timeoutMatch[1] : '30';
+          errorWithTimestamp(`⏱️  Établissement du tunnel trop lent (>${timeoutSeconds}s) - Nouvelle tentative...`);
+          // Immediate retry for timeout, no backoff
+          continue;
+        }
+
         if (err.message.includes('Tunnel restart interval reached')) {
-          console.log('🔄 Periodic tunnel restart');
+          console.log('🔄 Redémarrage périodique du tunnel');
           failureTracker.reset();
           continue;
         }

@@ -3,8 +3,8 @@
 # Script d'installation pour le client Node.js Relais
 # Version 1.1.0 avec améliorations de stabilité
 
-echo "📦 Installation du client Node.js Relais v1.1.1"
-echo "🔧 Avec améliorations de stabilité de connexion"
+echo "📦 Installation du client Node.js Relais v1.3.2"
+echo "🔧 Avec optimisations TCP et redémarrage configurable"
 echo ""
 
 # Vérifier que Node.js est installé
@@ -17,7 +17,7 @@ fi
 NODE_VERSION=$(node -v | sed 's/v//')
 REQUIRED_VERSION="18.0.0"
 
-if ! node -e "process.exit(process.versions.node.split('.').reduce((a,b,i)=>a+b*Math.pow(10,3-i),0) >= '$REQUIRED_VERSION'.split('.').reduce((a,b,i)=>a+b*Math.pow(10,3-i),0))"; then
+if ! node -e "process.exit(process.versions.node.split('.').reduce((a,b,i)=>a+b*Math.pow(10,3-i),0) >= '$REQUIRED_VERSION'.split('.').reduce((a,b,i)=>a+b*Math.pow(10,3-i),0) ? 0 : 1)"; then
     echo "❌ Node.js version $NODE_VERSION détectée. Version 18+ requise."
     exit 1
 fi
@@ -47,7 +47,7 @@ if [[ $REPLY =~ ^[Yy]$ ]]; then
         echo "⚠️  Erreur lors de l'installation globale. Vous pouvez utiliser 'npm start' dans ce répertoire."
     fi
 else
-    echo "ℹ️  Installation locale. Utilisez 'npm start' ou 'node src/index.js' pour lancer le client."
+    echo "ℹ️  Installation locale. Utilisez 'npm start' ou 'node src/cli.cjs' pour lancer le client."
 fi
 
 echo ""
@@ -58,8 +58,9 @@ echo "  1. Sauvegarder un token : relais set-token YOUR_TOKEN"
 echo "  2. Créer un tunnel     : relais tunnel -p 3000"
 echo "  3. Avec options        : relais tunnel -p 8080 -d mon-domaine.com -v"
 echo ""
-echo "🆕 Nouveautés v1.1.0 :"
-echo "  ✨ Gestion des heartbeats pour une connexion stable"
-echo "  ⏱️  Timeouts optimisés (60s keep-alive, 120s données)"
-echo "  🔄 Reconnexion automatique améliorée"
-echo "  🐛 Plus de déconnexions toutes les 30-45 secondes" 
+echo "🆕 Nouveautés v1.3.2 :"
+echo "  🎯 Intervalle de redémarrage configurable (--restart-interval)"
+echo "  ⚡ Connexions TCP optimisées avec buffers 256KB"
+echo "  🚀 Monitoring de santé plus rapide (3s/1s adaptatif)"
+echo "  🌐 Retry DNS avec backoff exponentiel"
+echo "  � Timeouts et keepalive optimisés (30s)" 

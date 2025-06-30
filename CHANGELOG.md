@@ -13,7 +13,7 @@
 #### Amélioration
 - **Flexibilité accrue** : Permet d'adapter le timeout selon les conditions réseau (connexions lentes, serveurs éloignés)
 - **Messages d'erreur dynamiques** : Les messages de timeout affichent maintenant la valeur configurée au lieu de "30 seconds"
-- **Support dans les deux CLI** : Disponible dans `src/index.js` (ES modules) et `src/cli.cjs` (CommonJS)
+- **Support dans le CLI** : Disponible dans `src/cli.cjs` (CommonJS)
 
 #### Utilisation
 ```bash
