@@ -1,8 +1,8 @@
-# Relais Node.js Client v1.3.3
+# Relais Node.js Client v1.3.4
 
 A Node.js client for the relay tunnel service, allowing you to expose local services to the Internet with persistent agent mode for maximum network resilience.
 
-## 🆕 What's New in v1.3.3
+## 🆕 What's New in v1.3.4
 
 - 🎯 **Configurable Restart Interval**: Customize tunnel restart timing (1-1440 minutes)
 - ⚡ **Optimized TCP Connections**: Enhanced socket performance with aggressive TCP optimizations
