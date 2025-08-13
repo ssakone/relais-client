@@ -9,7 +9,7 @@ import { loadToken } from '../utils/config.js';
 import { saveDeployConfig, updateDeployState, loadDeployConfig } from '../utils/deploy-config.js';
 
 const RELAIS_API_URL = 'https://relais.dev';
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB in bytes
+const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB in bytes
 
 export class DeployService {
   
@@ -136,7 +136,7 @@ export class DeployService {
       const sizeInMB = (stats.size / (1024 * 1024)).toFixed(2);
       debug(`Archive file size: ${sizeInMB}MB`);
       if (stats.size > MAX_FILE_SIZE) {
-        throw new Error(`Archive file too large: ${sizeInMB}MB (max: 10MB)`);
+        throw new Error(`Archive file too large: ${sizeInMB}MB (max: 50MB)`);
       }
     } catch (error) {
       throw new Error(`Size validation failed: ${error.message}`);
