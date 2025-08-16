@@ -147,7 +147,7 @@ export class HealthMonitor {
     
     if (wasDown) {
       this.currentlyDown = false;
-      console.log(`✅ Serveur rétabli! Connexion restaurée à ${new Date().toISOString()}`);
+      debug(`Serveur rétabli! Connexion restaurée à ${new Date().toISOString()}`);
       if (this.onConnectionRestored) {
         this.onConnectionRestored();
       }
@@ -198,7 +198,7 @@ export class HealthMonitor {
       return; // Le serveur est déjà accessible
     }
 
-    console.log('🔄 Attente du rétablissement du serveur...');
+    debug('Attente du rétablissement du serveur...');
     
     return new Promise((resolve) => {
       const checkRecovery = setInterval(async () => {

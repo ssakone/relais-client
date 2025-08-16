@@ -4,6 +4,7 @@ import { setKeepAlive, setNoDelay, handleNewConnection, optimizeSocket } from '.
 import { debug, errorWithTimestamp } from '../utils/debug.js';
 import { ConnectionFailureTracker } from '../utils/failure-tracker.js';
 import { HealthMonitor } from '../utils/health-monitor.js';
+import { createSpinner } from '../utils/terminal-spinner.js';
 
 // Utility function to read a complete JSON message from socket
 function createJSONDecoder(socket) {
@@ -134,17 +135,12 @@ export async function connectAndServe(options, failureTracker = null) {
   }
   const TUNNEL_ESTABLISHMENT_TIMEOUT = timeoutSeconds * 1000;
   
-  // Extract host from server option for failover logic
+  // Extract host from server option and ensure default port 1080
   const [serverHost, primaryPort] = options.server.split(':');
   const primaryServer = `${serverHost}:${primaryPort || '1080'}`;
-  const secondaryServer = `${serverHost}:1081`;
   
-  // Check if we should use secondary server due to primary failures
+  // Always use the primary server; secondary failover is removed
   let currentServer = primaryServer;
-  if (failureTracker && failureTracker.shouldUseSecondaryServer && failureTracker.shouldUseSecondaryServer()) {
-    currentServer = secondaryServer;
-    debug('Using secondary server due to primary server failures');
-  }
   
   const establishmentPromise = (async () => {
     // Connect to relay server (control channel)
@@ -152,6 +148,7 @@ export async function connectAndServe(options, failureTracker = null) {
     const [connHost, connPort] = currentServer.split(':');
 
     try {
+      const connectSpinner = createSpinner(`Connecting to ${connHost}:${connPort}`).start();
       debug(`Attempting TCP connection to ${connHost}:${connPort}`);
       const connectionStartTime = Date.now();
       
@@ -189,6 +186,7 @@ export async function connectAndServe(options, failureTracker = null) {
               clearTimeout(connectTimeout);
               const connectionTime = Date.now() - connectionStartTime;
               debug(`Connected to relay server: ${currentServer} (took ${connectionTime}ms)`);
+              connectSpinner.succeed(`Connected to ${connHost}:${connPort} (${connectionTime}ms)`);
               
               // Apply comprehensive TCP optimizations after connection
               optimizeSocket(ctrlConn);
@@ -233,6 +231,7 @@ export async function connectAndServe(options, failureTracker = null) {
       );
 
       debug('Sending tunnel request:', JSON.stringify(request));
+      const establishSpinner = createSpinner('Establishing tunnel').start();
       const requestSentTime = Date.now();
       ctrlConn.write(JSON.stringify(request) + '\n');
 
@@ -247,13 +246,17 @@ export async function connectAndServe(options, failureTracker = null) {
 
       if (response.status !== 'OK') {
         if (response.error && response.error.includes('Token')) {
+          establishSpinner.fail('Authentication error');
           throw new Error(`Authentication error: ${response.error}`);
         }
+        establishSpinner.fail('Server error');
         throw new Error(`Server error: ${response.error}`);
       }
+      establishSpinner.succeed('Tunnel established');
       
       return { ctrlConn, decoder, response };
     } catch (err) {
+      try { createSpinner().fail('Connection failed'); } catch {}
       if (ctrlConn) {
         ctrlConn.destroy();
       }
@@ -279,16 +282,16 @@ export async function connectAndServe(options, failureTracker = null) {
     decoder = result.decoder;
     response = result.response;
 
-    // Display tunnel URL
+    // Display tunnel URL (keep user-facing)
     const publicAddr = response.public_addr;
     if (options.type === 'http') {
       console.log('🚀 Tunnel active! Accessible via:', 'https://' + publicAddr.split(':')[0]);
-      console.log(`🔗 Connected to server: ${currentServer}`);
+      debug(`Connected to server: ${currentServer}`);
     } else {
       const connHost = currentServer.split(':')[0];
       const publicPort = publicAddr.split(':')[1];
       console.log('🚀 Tunnel active! Accessible via:', `tcp://${connHost}:${publicPort}`);
-      console.log(`🔗 Connected to server: ${currentServer}`);
+      debug(`Connected to server: ${currentServer}`);
     }
 
     // Initialize heartbeat monitoring
@@ -314,10 +317,10 @@ export async function connectAndServe(options, failureTracker = null) {
       }
     );
 
-    console.log('🏥 Monitoring de santé du serveur activé (vérification toutes les 3s)');
+    debug('Monitoring de santé du serveur activé (vérification toutes les 3s)');
 
     // Log restart interval configuration
-    console.log(`⏱️  Redémarrage automatique du tunnel configuré: toutes les ${restartIntervalMinutes} minutes`);
+    debug(`Redémarrage automatique du tunnel configuré: toutes les ${restartIntervalMinutes} minutes`);
 
     // Flag to indicate that the periodic restart timer has fired.
     let restartTriggered = false;
@@ -367,7 +370,7 @@ export async function connectAndServe(options, failureTracker = null) {
           
           // Show success message if we were in warning state
           if (wasWarningShown) {
-            console.log(`✅ Server is alive again! Heartbeat resumed at ${new Date().toISOString()}`);
+            debug(`Server is alive again! Heartbeat resumed at ${new Date().toISOString()}`);
             heartbeatMonitor.resetWarning();
           }
         } else {
@@ -452,7 +455,7 @@ export async function runTunnel(options) {
         await tempHealthMonitor.waitForServerRecovery();
         tempHealthMonitor.stop();
         
-        console.log('🔄 Serveur rétabli - Reprise de la connexion tunnel...');
+        debug('Serveur rétabli - Reprise de la connexion tunnel...');
         // Continue to reconnect immediately without backoff
         continue;
       }
@@ -467,11 +470,11 @@ export async function runTunnel(options) {
       }
 
       // Handle periodic restart without backoff
-      if (err.message.includes('Tunnel restart interval reached')) {
-        console.log('🔄 Redémarrage périodique du tunnel');
-        failureTracker.reset();
-        continue;
-      }
+        if (err.message.includes('Tunnel restart interval reached')) {
+          debug('Redémarrage périodique du tunnel');
+          failureTracker.reset();
+          continue;
+        }
       
       // Determine error type and handle accordingly
       if (err.message.includes('Connection closed by server')) {

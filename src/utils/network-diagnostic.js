@@ -5,7 +5,7 @@ import https from 'https';
 import dns from 'dns/promises';
 import { execSync } from 'child_process';
 
-const RELAY_SERVER = '104.168.64.151:1080';
+const RELAY_SERVER = 'tcp.relais.dev:1080';
 const HEALTH_URL = 'https://relais.dev/api/health';
 
 console.log('🔍 Diagnostic réseau pour Relais Tunnel\n');

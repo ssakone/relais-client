@@ -1,8 +1,22 @@
-import { join } from 'path';
+import { join, isAbsolute } from 'path';
 import { readFile, writeFile, access } from 'fs/promises';
 import { debug, errorWithTimestamp } from './debug.js';
 
-const RELAIS_CONFIG_FILE = join(process.cwd(), 'relais.json');
+// Allow overriding the deploy config file path (default: ./relais.json)
+let deployConfigFilePath = join(process.cwd(), 'relais.json');
+
+export function setDeployConfigFile(filePath) {
+  try {
+    if (!filePath || typeof filePath !== 'string') {
+      return;
+    }
+    deployConfigFilePath = isAbsolute(filePath) ? filePath : join(process.cwd(), filePath);
+    debug('Using deploy config file:', deployConfigFilePath);
+  } catch (err) {
+    // Fallback silently to default on any error
+    errorWithTimestamp('Failed to set deploy config file:', err.message);
+  }
+}
 
 /**
  * Save deployment configuration to relais.json
@@ -25,8 +39,8 @@ export async function saveDeployConfig(config) {
       ...config
     };
 
-    await writeFile(RELAIS_CONFIG_FILE, JSON.stringify(configData, null, 2));
-    debug('Deployment config saved:', configData);
+    await writeFile(deployConfigFilePath, JSON.stringify(configData, null, 2));
+    debug('Deployment config saved');
   } catch (error) {
     debug('Failed to save deployment config:', error.message);
     // Don't throw error for config save failures
@@ -39,11 +53,11 @@ export async function saveDeployConfig(config) {
  */
 export async function loadDeployConfig() {
   try {
-    await access(RELAIS_CONFIG_FILE);
-    const configData = await readFile(RELAIS_CONFIG_FILE, 'utf-8');
+    await access(deployConfigFilePath);
+    const configData = await readFile(deployConfigFilePath, 'utf-8');
     const config = JSON.parse(configData);
     
-    debug('Deployment config loaded:', config);
+    debug('Deployment config loaded');
     return config;
   } catch (error) {
     debug('No deployment config found or failed to load:', error.message);
@@ -57,7 +71,7 @@ export async function loadDeployConfig() {
  */
 export async function hasDeployConfig() {
   try {
-    await access(RELAIS_CONFIG_FILE);
+    await access(deployConfigFilePath);
     return true;
   } catch (error) {
     return false;

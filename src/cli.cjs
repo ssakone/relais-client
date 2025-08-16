@@ -5,7 +5,7 @@ const path = require('path');
 const url = require('url');
 
 // Default configuration
-const DEFAULT_SERVER = '104.168.64.151:1080';
+const DEFAULT_SERVER = 'tcp.relais.dev:1080';
 const DEFAULT_PROTOCOL = 'http';
 
 let debug = (...args) => {
@@ -25,7 +25,7 @@ const program = new Command();
 program
   .name('relais')
   .description('Node.js client for the relay tunnel service')
-  .version('1.3.4');
+  .version('1.4.0');
 
 program
   .command('set-token <token>')
@@ -46,6 +46,7 @@ program
   .description('🚀 Deploy a project folder to Relais platform (experimental)')
   .option('-t, --type <type>', 'Deployment type (web, api, etc.)', 'web')
   .option('-d, --domain <domain>', 'Custom domain for deployment')
+  .option('-f, --file <path>', 'Path to deploy config JSON (default: relais.json)')
   .option('-v, --verbose', 'Enable detailed logging')
   .action(async (folder, options) => {
     if (options.verbose) {
@@ -58,8 +59,11 @@ program
       let deployDomain = options.domain;
       let isUpdate = false;
       
-      // Check if relais.json exists to determine if this is an update
-      const { loadDeployConfig, hasDeployConfig } = await import('./utils/deploy-config.js');
+      // Configure and check deploy config file to determine if this is an update
+      const { loadDeployConfig, hasDeployConfig, setDeployConfigFile } = await import('./utils/deploy-config.js');
+      if (options.file) {
+        setDeployConfigFile(options.file);
+      }
       const configExists = await hasDeployConfig();
       
       // If no folder specified, try to load from config
@@ -74,15 +78,14 @@ program
               deployDomain = config.domain;
             }
             isUpdate = true;
-            console.log(`📄 Using saved configuration (UPDATE MODE):`);
-            console.log(`   Folder: ${deployFolder}`);
-            console.log(`   Type: ${deployType}`);
-            console.log(`   Domain: ${deployDomain || 'None'}`);
+            debug(`Using saved configuration (UPDATE MODE)`);
+            debug(`Folder: ${deployFolder}`);
+            debug(`Type: ${deployType}`);
+            debug(`Domain: ${deployDomain || 'None'}`);
             if (options.domain && options.domain !== config.domain) {
-              console.log(`   🔄 Domain changed from: ${config.domain || 'None'} to: ${options.domain}`);
+              debug(`Domain changed from: ${config.domain || 'None'} to: ${options.domain}`);
             }
-            console.log(`   Last deployment: ${config.lastDeployed || 'Unknown'}`);
-            console.log('');
+            debug(`Last deployment: ${config.lastDeployed || 'Unknown'}`);
           } else {
             errorWithTimestamp('No folder specified and no saved configuration found.');
             console.log('Usage: relais deploy <folder> or save a configuration first.');
@@ -103,28 +106,27 @@ program
             if (!deployDomain) {
               deployDomain = config.domain;
             }
-            console.log('📄 Existing configuration found for this folder - UPDATE MODE');
+            debug('Existing configuration found for this folder - UPDATE MODE');
             if (options.domain && options.domain !== config.domain) {
-              console.log(`   🔄 Domain changed from: ${config.domain || 'None'} to: ${options.domain}`);
+              debug(`Domain changed from: ${config.domain || 'None'} to: ${options.domain}`);
             }
           } else {
-            console.log('📄 Existing configuration found but for different folder - CREATE MODE');
+            debug('Existing configuration found but for different folder - CREATE MODE');
           }
         }
       }
       
-      console.log('Starting deployment...');
-      console.log(`📁 Folder: ${deployFolder}`);
-      console.log(`🏷️  Type: ${deployType}`);
-      if (deployDomain) console.log(`🌐 Domain: ${deployDomain}`);
-      console.log(`🔄 Mode: ${isUpdate ? 'UPDATE' : 'CREATE'}`);
+      debug('Starting deployment...');
+      debug(`Folder: ${deployFolder}`);
+      debug(`Type: ${deployType}`);
+      if (deployDomain) debug(`Domain: ${deployDomain}`);
+      debug(`Mode: ${isUpdate ? 'UPDATE' : 'CREATE'}`);
       
       const { deployService } = await import('./services/deploy.js');
       const result = await deployService.deploy(deployFolder, deployType, isUpdate, deployDomain);
       
-      console.log('✅ Upload successful!');
-      console.log('');
-      console.log('🔄 waiting for deployment status');
+      debug('Upload successful.');
+      debug('Waiting for deployment status...');
       
       // Poll deployment status after showing upload success
       await deployService.pollDeploymentStatus(result.id);
@@ -185,7 +187,7 @@ program
     // Import failure tracker for persistent connection
     const { ConnectionFailureTracker } = await import('./utils/failure-tracker.js');
     const failureTracker = new ConnectionFailureTracker();
-    console.log('🤖 Mode agent activé - Reconnexion persistante en cas d\'erreur réseau');
+    debug('Mode agent activé - Reconnexion persistante en cas d\'erreur réseau');
 
     while (true) {
       try {
@@ -212,7 +214,7 @@ program
           await tempHealthMonitor.waitForServerRecovery();
           tempHealthMonitor.stop();
           
-          console.log('🔄 Serveur rétabli - Reprise de la connexion tunnel...');
+          debug('Serveur rétabli - Reprise de la connexion tunnel...');
           // Continue to reconnect immediately without backoff
           continue;
         }
@@ -223,17 +225,12 @@ program
           const timeoutSeconds = timeoutMatch ? timeoutMatch[1] : '30';
           errorWithTimestamp(`⏱️  Établissement du tunnel trop lent (>${timeoutSeconds}s) - Nouvelle tentative...`);
           
-          // Record primary server failure for potential failover
-          if (!failureTracker.shouldUseSecondaryServer()) {
-            failureTracker.recordPrimaryServerFailure();
-          }
-          
           // Immediate retry for timeout, no backoff
           continue;
         }
 
         if (err.message.includes('Tunnel restart interval reached')) {
-          console.log('🔄 Redémarrage périodique du tunnel');
+          debug('Redémarrage périodique du tunnel');
           failureTracker.reset();
           continue;
         }
@@ -247,24 +244,14 @@ program
         } else if (failureTracker.isNetworkError(err)) {
           // Network errors - continue trying indefinitely with backoff
           failureTracker.recordNetworkError();
-          
-          // Record primary server failure for potential failover
-          if (!failureTracker.shouldUseSecondaryServer()) {
-            failureTracker.recordPrimaryServerFailure();
-          }
-          
+
           const backoffDuration = failureTracker.getBackoffDuration();
           errorWithTimestamp(`Network error: ${err.message}; reconnecting in ${backoffDuration}ms...`);
           await new Promise(resolve => setTimeout(resolve, backoffDuration));
         } else {
           // Other errors - treat as network errors for agent mode
           failureTracker.recordNetworkError();
-          
-          // Record primary server failure for potential failover
-          if (!failureTracker.shouldUseSecondaryServer()) {
-            failureTracker.recordPrimaryServerFailure();
-          }
-          
+
           const backoffDuration = failureTracker.getBackoffDuration();
           errorWithTimestamp(`Connection error: ${err.message}; reconnecting in ${backoffDuration}ms...`);
           await new Promise(resolve => setTimeout(resolve, backoffDuration));

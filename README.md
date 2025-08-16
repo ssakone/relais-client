@@ -1,8 +1,14 @@
-# Relais Node.js Client v1.3.4
+# Relais Node.js Client v1.4.0
 
 A Node.js client for the relay tunnel service, allowing you to expose local services to the Internet with persistent agent mode for maximum network resilience.
 
-## 🆕 What's New in v1.3.4
+## 🆕 What's New in v1.4.0
+
+- ✨ **Terminal animations**: Clear visual feedback with animated steps for connecting, establishing tunnels, uploads, and deployment status (uses `chalk`)
+- 🌐 **Server address simplified**: Always uses `tcp.relais.dev:1080` (failover and old IP/ports removed)
+- 📝 **Docs & CLI**: Updated defaults and messages to reflect the new server and animations
+
+## Previous (v1.3.4)
 
 - 🎯 **Configurable Restart Interval**: Customize tunnel restart timing (1-1440 minutes)
 - ⚡ **Optimized TCP Connections**: Enhanced socket performance with aggressive TCP optimizations
@@ -35,6 +41,18 @@ npm install -g relais
 
 ## Usage
 
+### Deploy a project
+
+```bash
+relais deploy [folder] [-t web|api] [-d domain] [-f config.json] [-v]
+```
+
+Options:
+- `-t, --type <type>` : Deployment type (default: web)
+- `-d, --domain <domain>` : Custom domain
+- `-f, --file <path>` : Path to deploy config JSON (default: `relais.json`)
+- `-v, --verbose` : Detailed logging
+
 ### Save a token
 
 ```bash
@@ -60,7 +78,7 @@ relais tunnel [options]
 ```
 
 Available options:
-- `-s, --server <address>` : Relay server address (default: 104.168.64.151:1080)
+- `-s, --server <address>` : Relay server address (default: tcp.relais.dev:1080)
 - `-h, --host <host>` : Local service host (default: localhost)
 - `-p, --port <port>` : Local service port (required)
 - `-k, --token <token>` : Authentication token (optional, required for some services)
@@ -90,7 +108,7 @@ relais tunnel -p 3000 --timeout 60
 relais tunnel -p 3000 --restart-interval 60
 
 # With all parameters and verbose logging
-relais tunnel -s server:1080 -h localhost -p 3000 -k mytoken -d mysite.example.com -r 8080 -t http --timeout 60 --restart-interval 120 -v
+relais tunnel -s tcp.relais.dev:1080 -h localhost -p 3000 -k mytoken -d mysite.example.com -r 8080 -t http --timeout 60 --restart-interval 120 -v
 ```
 
 ## 🔧 Technical Improvements

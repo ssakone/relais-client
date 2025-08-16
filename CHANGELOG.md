@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.4.0] - 2025-08-16
+
+### Enhancements
+- ✨ Terminal animations for key steps using `chalk` (connect, establish tunnel, deploy upload, and status polling)
+- 🌐 Simplified server address: always `tcp.relais.dev:1080`
+
+### Removed
+- 🗑️ Failover logic to secondary port and old IP references
+
+### Updated
+- 📝 README and CLI defaults/messages updated to reflect new server and animations
+- 📦 Dependencies: added `chalk@^5.3.0`
+
+---
+
 ## [1.2.1] - 2025-06-30
 
 ### Nouvelle fonctionnalité - Timeout configurable 🕐

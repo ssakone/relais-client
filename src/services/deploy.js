@@ -7,6 +7,7 @@ import { createWriteStream } from 'fs';
 import { debug, errorWithTimestamp } from '../utils/debug.js';
 import { loadToken } from '../utils/config.js';
 import { saveDeployConfig, updateDeployState, loadDeployConfig } from '../utils/deploy-config.js';
+import { createSpinner } from '../utils/terminal-spinner.js';
 
 const RELAIS_API_URL = 'https://relais.dev';
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB in bytes
@@ -22,16 +23,26 @@ export class DeployService {
    */
   async deploy(folderPath, type = 'web', isUpdate = false, domain = undefined) {
     let archivePath = null;
+    const spinners = [];
     
     try {
       // Validate folder exists
+      const sValidate = createSpinner('Validating folder').start();
+      spinners.push(sValidate);
       await this.validateFolder(folderPath);
+      sValidate.succeed('Folder validated');
       
       // Create tar.gz file
+      const sArchive = createSpinner('Creating archive').start();
+      spinners.push(sArchive);
       archivePath = await this.createTarGz(folderPath);
+      sArchive.succeed('Archive created');
       
       // Validate archive file size
+      const sSize = createSpinner('Validating archive size').start();
+      spinners.push(sSize);
       await this.validateArchiveSize(archivePath);
+      sSize.succeed('Archive size validated');
       
       let result;
       if (isUpdate) {
@@ -42,15 +53,23 @@ export class DeployService {
         }
         
         // Update existing deployment
+        const sUpload = createSpinner('Uploading update to Relais').start();
+        spinners.push(sUpload);
         result = await this.updateDeployment(existingConfig.id, archivePath, type, domain);
-        console.log('🔄 Updated existing deployment');
+        sUpload.succeed('Update uploaded');
+        debug('Updated existing deployment');
       } else {
         // Create new deployment
+        const sUpload = createSpinner('Uploading deployment to Relais').start();
+        spinners.push(sUpload);
         result = await this.uploadToPocketBase(archivePath, type, domain);
-        console.log('🆕 Created new deployment');
+        sUpload.succeed('Deployment uploaded');
+        debug('Created new deployment');
       }
       
       // Save deployment configuration
+      const sConfig = createSpinner('Saving deployment configuration').start();
+      spinners.push(sConfig);
       await saveDeployConfig({
         id: result.id,
         folder: folderPath,
@@ -59,10 +78,15 @@ export class DeployService {
         file: result.file,
         domain: domain || null
       });
+      sConfig.succeed('Deployment configuration saved');
       
       return result;
       
     } catch (error) {
+      // Fail any active spinners
+      for (const s of spinners) {
+        if (s && s.active) s.fail();
+      }
       errorWithTimestamp('Deploy failed:', error.message);
       throw error;
     } finally {
@@ -184,7 +208,6 @@ export class DeployService {
         type,
         fileSize: archiveBuffer.length,
         hasToken: !!token,
-        token,
         domain,
       });
       
@@ -317,6 +340,7 @@ export class DeployService {
   async pollDeploymentStatus(deploymentId) {
     let hasShownProcessing = false;
     let hasShownPending = false;
+    const statusSpinner = createSpinner('Waiting for deployment status').start();
     
     return new Promise((resolve, reject) => {
       const checkStatus = async () => {
@@ -333,20 +357,21 @@ export class DeployService {
           
           switch (status.state) {
             case 'DEPLOYED':
-              console.log(`🚀 Project deployed! Accessible via: https://${status.domain}`);
+              statusSpinner.succeed(`Project deployed: https://${status.domain}`);
               await updateDeployState('DEPLOYED', status.domain);
               resolve(status);
               return;
               
             case 'FAILED':
-              console.log(`❌ Deployment failed: ${status.error || 'Unknown error'}`);
+              statusSpinner.fail('Deployment failed');
+              errorWithTimestamp(`❌ Deployment failed: ${status.error || 'Unknown error'}`);
               await updateDeployState('FAILED');
               reject(new Error(`Deployment failed: ${status.error || 'Unknown error'}`));
               return;
               
             case 'PROCESSING':
               if (!hasShownProcessing) {
-                console.log('⏳ Deployment is processing...');
+                statusSpinner.update('Deployment processing...');
                 await updateDeployState('PROCESSING');
                 hasShownProcessing = true;
               }
@@ -354,14 +379,14 @@ export class DeployService {
               
             case 'PENDING':
               if (!hasShownPending) {
-                console.log('⏳ Deployment is pending...');
+                statusSpinner.update('Deployment pending...');
                 await updateDeployState('PENDING');
                 hasShownPending = true;
               }
               break;
               
             default:
-              debug('Unknown deployment state:', status.state);
+              statusSpinner.update(`Deployment state: ${status.state}`);
               break;
           }
           
@@ -369,6 +394,7 @@ export class DeployService {
           setTimeout(checkStatus, 1000);
           
         } catch (error) {
+          statusSpinner.fail('Status check error');
           reject(new Error(`Status check error: ${error.message}`));
         }
       };

@@ -40,7 +40,9 @@ export async function saveToken(token) {
     const configDir = await getConfigDir();
     const tokenFile = join(configDir, 'token');
     
-    console.log(`Saving token to: ${tokenFile}`);
+    if (process.env.DEBUG) {
+      console.log(`Saving token to: ${tokenFile}`);
+    }
     await writeFile(tokenFile, token.trim(), { mode: 0o600 }); // Secure permissions
     
     // Verify the token was saved correctly
@@ -49,7 +51,9 @@ export async function saveToken(token) {
       throw new Error('Token verification failed after save');
     }
     
-    console.log('Token saved successfully');
+    if (process.env.DEBUG) {
+      console.log('Token saved successfully');
+    }
   } catch (err) {
     throw new Error(`Error saving token: ${err.message}`);
   }
