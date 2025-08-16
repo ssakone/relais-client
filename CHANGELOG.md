@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.4.1] - 2025-08-16
+
+### Changed
+- ✅ Restricted deployment types to `web`, `react`, and `static`
+- 📦 Increased maximum upload/archive size to 100MB
+
+---
+
 ## [1.4.0] - 2025-08-16
 
 ### Enhancements

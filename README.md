@@ -1,8 +1,14 @@
-# Relais Node.js Client v1.4.0
+# Relais Node.js Client v1.4.1
 
 A Node.js client for the relay tunnel service, allowing you to expose local services to the Internet with persistent agent mode for maximum network resilience.
 
-## 🆕 What's New in v1.4.0
+## 🆕 What's New in v1.4.1
+
+- ✅ **Deploy type restrictions**: Allowed types are now `web`, `react`, and `static`
+- 📦 **Larger uploads**: Max archive size increased to 100MB
+- ✨ Terminal animations and server simplification from v1.4.0 retained
+
+## Previous (v1.4.0)
 
 - ✨ **Terminal animations**: Clear visual feedback with animated steps for connecting, establishing tunnels, uploads, and deployment status (uses `chalk`)
 - 🌐 **Server address simplified**: Always uses `tcp.relais.dev:1080` (failover and old IP/ports removed)
@@ -44,11 +50,11 @@ npm install -g relais
 ### Deploy a project
 
 ```bash
-relais deploy [folder] [-t web|api] [-d domain] [-f config.json] [-v]
+relais deploy [folder] [-t web|react|static] [-d domain] [-f config.json] [-v]
 ```
 
 Options:
-- `-t, --type <type>` : Deployment type (default: web)
+- `-t, --type <type>` : Deployment type (allowed: web, react, static; default: web)
 - `-d, --domain <domain>` : Custom domain
 - `-f, --file <path>` : Path to deploy config JSON (default: `relais.json`)
 - `-v, --verbose` : Detailed logging

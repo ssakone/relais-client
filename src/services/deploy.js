@@ -10,7 +10,7 @@ import { saveDeployConfig, updateDeployState, loadDeployConfig } from '../utils/
 import { createSpinner } from '../utils/terminal-spinner.js';
 
 const RELAIS_API_URL = 'https://relais.dev';
-const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB in bytes
+const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB in bytes
 
 export class DeployService {
   
@@ -26,6 +26,12 @@ export class DeployService {
     const spinners = [];
     
     try {
+      // Validate deployment type
+      const allowedTypes = new Set(['web', 'react', 'static']);
+      if (!allowedTypes.has(type)) {
+        throw new Error(`Invalid deployment type: ${type}. Allowed types: web, react, static`);
+      }
+
       // Validate folder exists
       const sValidate = createSpinner('Validating folder').start();
       spinners.push(sValidate);
