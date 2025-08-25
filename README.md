@@ -1,10 +1,12 @@
-# Relais Node.js Client v1.4.1
+# Relais Node.js Client v1.4.2
 
 A Node.js client for the relay tunnel service, allowing you to expose local services to the Internet with persistent agent mode for maximum network resilience.
 
-## 🆕 What's New in v1.4.1
+## 🆕 What's New in v1.4.2
 
-- ✅ **Deploy type restrictions**: Allowed types are now `web`, `react`, and `static`
+- ✅ **New deployment types**: Added support for `node` and `nextjs` deployments
+- ✅ **Package.json validation**: Node.js and Next.js deployments now require a package.json file
+- ✅ **Deploy type restrictions**: Allowed types are now `web`, `react`, `static`, `node`, and `nextjs`
 - 📦 **Larger uploads**: Max archive size increased to 100MB
 - ✨ Terminal animations and server simplification from v1.4.0 retained
 
@@ -50,14 +52,16 @@ npm install -g relais
 ### Deploy a project
 
 ```bash
-relais deploy [folder] [-t web|react|static] [-d domain] [-f config.json] [-v]
+relais deploy [folder] [-t web|react|static|node|nextjs] [-d domain] [-f config.json] [-v]
 ```
 
 Options:
-- `-t, --type <type>` : Deployment type (allowed: web, react, static; default: web)
+- `-t, --type <type>` : Deployment type (allowed: web, react, static, node, nextjs; default: web)
 - `-d, --domain <domain>` : Custom domain
 - `-f, --file <path>` : Path to deploy config JSON (default: `relais.json`)
 - `-v, --verbose` : Detailed logging
+
+Note: Node.js and Next.js deployments require a `package.json` file in the project folder.
 
 ### Save a token
 

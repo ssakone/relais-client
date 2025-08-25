@@ -2,7 +2,7 @@ import archiver from 'archiver';
 // Using native FormData (Node.js 18+) as recommended by PocketBase maintainer
 import fs from 'fs';
 import path from 'path';
-import { stat, access, readFile } from 'fs/promises';
+import { stat, access, readFile, readdir } from 'fs/promises';
 import { createWriteStream } from 'fs';
 import { debug, errorWithTimestamp } from '../utils/debug.js';
 import { loadToken } from '../utils/config.js';
@@ -13,6 +13,115 @@ const RELAIS_API_URL = 'https://relais.dev';
 const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB in bytes
 
 export class DeployService {
+  
+  /**
+   * Parse .gitignore file and create file filter function
+   * @param {string} folderPath - Path to the folder to deploy
+   * @param {string} archiveBasename - Basename of the generated archive to exclude
+   * @param {string} deployType - Type of deployment to add specific ignores
+   */
+  async createFileFilter(folderPath, archiveBasename, deployType = 'web') {
+    const ignorePatterns = [];
+    
+    // Always ignore relais.json, all tar.gz files, and .git directory
+    ignorePatterns.push('relais.json');
+    ignorePatterns.push('*.tar.gz'); // Ignore all tar.gz files
+    ignorePatterns.push('.git/'); // Ignore git directory
+    if (archiveBasename) {
+      ignorePatterns.push(archiveBasename);
+    }
+    
+    // No deployment type-specific ignores needed for current types
+    
+    // Try to read .gitignore file
+    const gitignorePath = path.join(folderPath, '.gitignore');
+    try {
+      debug('Reading .gitignore from:', gitignorePath);
+      const gitignoreContent = await readFile(gitignorePath, 'utf-8');
+      debug('Raw .gitignore content length:', gitignoreContent.length);
+      const lines = gitignoreContent.split('\n')
+        .map(line => line.trim())
+        .filter(line => line && !line.startsWith('#')); // Remove empty lines and comments
+      ignorePatterns.push(...lines);
+      debug('Loaded .gitignore patterns:', lines);
+      debug('Total patterns after .gitignore:', ignorePatterns.length);
+    } catch (error) {
+      debug('No .gitignore file found or could not read it:', error.message);
+    }
+    
+    debug('All ignore patterns:', ignorePatterns);
+    
+    // Create filter function
+    return (filePath, relativePath) => {
+      // Convert absolute path to relative path from folder root
+      const relPath = path.relative(folderPath, filePath);
+      
+      // Check against ignore patterns
+      for (const pattern of ignorePatterns) {
+        if (this.matchesIgnorePattern(relPath, pattern)) {
+          debug('✗ Filtering out:', relPath, 'matches pattern:', pattern);
+          return false;
+        }
+      }
+      
+      return true;
+    };
+  }
+  
+  /**
+   * Check if a file path matches a gitignore pattern
+   * @param {string} filePath - Relative file path to check
+   * @param {string} pattern - Gitignore pattern to match against
+   */
+  matchesIgnorePattern(filePath, pattern) {
+    // Normalize path separators for cross-platform compatibility
+    const normalizedPath = filePath.replace(/\\/g, '/');
+    const normalizedPattern = pattern.replace(/\\/g, '/');
+    
+    debug(`Testing path "${normalizedPath}" against pattern "${normalizedPattern}"`);
+    
+    // Handle directory patterns (ending with /)
+    if (normalizedPattern.endsWith('/')) {
+      const dirPattern = normalizedPattern.slice(0, -1);
+      // Check if path is the directory itself or inside it
+      const matches = normalizedPath === dirPattern || 
+                     normalizedPath.startsWith(dirPattern + '/');
+      debug(`Directory pattern "${normalizedPattern}": ${matches ? 'MATCH' : 'NO MATCH'}`);
+      return matches;
+    }
+    
+    // Handle wildcard patterns
+    if (normalizedPattern.includes('*')) {
+      // Convert gitignore pattern to regex
+      let regexPattern = normalizedPattern
+        .replace(/\./g, '\\.')  // Escape dots
+        .replace(/\*\*/g, '@@DOUBLESTAR@@')  // Temporarily replace **
+        .replace(/\*/g, '[^/]*')  // * matches anything except /
+        .replace(/@@DOUBLESTAR@@/g, '.*')  // ** matches anything including /
+        .replace(/\?/g, '[^/]');  // ? matches single char except /
+      
+      const regex = new RegExp('^' + regexPattern + '$');
+      const matches = regex.test(normalizedPath);
+      debug(`Wildcard pattern "${normalizedPattern}" -> regex "${regexPattern}": ${matches ? 'MATCH' : 'NO MATCH'}`);
+      return matches;
+    }
+    
+    // Handle leading slash patterns (root-relative)
+    if (normalizedPattern.startsWith('/')) {
+      const rootPattern = normalizedPattern.slice(1); // Remove leading slash
+      const matches = normalizedPath === rootPattern || 
+                     normalizedPath.startsWith(rootPattern + '/');
+      debug(`Root-relative pattern "${normalizedPattern}": ${matches ? 'MATCH' : 'NO MATCH'}`);
+      return matches;
+    }
+    
+    // Exact match or directory content match
+    const matches = normalizedPath === normalizedPattern || 
+                   normalizedPath.startsWith(normalizedPattern + '/') ||
+                   path.basename(normalizedPath) === normalizedPattern;
+    debug(`Exact/basename pattern "${normalizedPattern}": ${matches ? 'MATCH' : 'NO MATCH'}`);
+    return matches;
+  }
   
   /**
    * Deploy a folder by creating a tar.gz archive and uploading to PocketBase
@@ -27,21 +136,21 @@ export class DeployService {
     
     try {
       // Validate deployment type
-      const allowedTypes = new Set(['web', 'react', 'static']);
+      const allowedTypes = new Set(['web', 'react', 'static', 'node']);
       if (!allowedTypes.has(type)) {
-        throw new Error(`Invalid deployment type: ${type}. Allowed types: web, react, static`);
+        throw new Error(`Invalid deployment type: ${type}. Allowed types: web, react, static, node`);
       }
 
       // Validate folder exists
       const sValidate = createSpinner('Validating folder').start();
       spinners.push(sValidate);
-      await this.validateFolder(folderPath);
+      await this.validateFolder(folderPath, type);
       sValidate.succeed('Folder validated');
       
       // Create tar.gz file
       const sArchive = createSpinner('Creating archive').start();
       spinners.push(sArchive);
-      archivePath = await this.createTarGz(folderPath);
+      archivePath = await this.createTarGz(folderPath, type);
       sArchive.succeed('Archive created');
       
       // Validate archive file size
@@ -105,14 +214,26 @@ export class DeployService {
   
   /**
    * Validate that the folder exists and is accessible
+   * For Node.js and Next.js deployments, also validate that package.json exists
    */
-  async validateFolder(folderPath) {
+  async validateFolder(folderPath, type = 'web') {
     try {
       await access(folderPath);
       const stats = await stat(folderPath);
       
       if (!stats.isDirectory()) {
         throw new Error(`${folderPath} is not a directory`);
+      }
+      
+      // For Node.js deployments, check that package.json exists
+      if (type === 'node') {
+        const packageJsonPath = path.join(folderPath, 'package.json');
+        try {
+          await access(packageJsonPath);
+          debug('package.json validation passed for Node.js deployment');
+        } catch (error) {
+          throw new Error(`${type} deployment requires a package.json file in the project folder`);
+        }
       }
       
       debug('Folder validation passed:', folderPath);
@@ -122,39 +243,86 @@ export class DeployService {
   }
   
   /**
-   * Create a tar.gz file from the specified folder
+   * Create a tar.gz file from the specified folder with gitignore filtering
    */
-  async createTarGz(folderPath) {
-    return new Promise((resolve, reject) => {
-      const folderName = path.basename(folderPath);
-      const tarGzPath = path.join(process.cwd(), `${folderName}-${Date.now()}.tar.gz`);
-      
-      debug('Creating tar.gz file:', tarGzPath);
-      
-      const output = createWriteStream(tarGzPath);
-      const archive = archiver('tar', {
-        gzip: true,
-        gzipOptions: {
-          level: 9, // Maximum compression
-          memLevel: 9
-        }
-      });
-      
-      output.on('close', () => {
-        debug(`Tar.gz created successfully: ${archive.pointer()} bytes`);
-        resolve(tarGzPath);
-      });
-      
-      archive.on('error', (err) => {
-        reject(new Error(`Tar.gz creation failed: ${err.message}`));
-      });
-      
-      archive.pipe(output);
-      // Add directory contents without the parent folder name
-      // This ensures extracted files are at root level, not in a subfolder
-      archive.directory(folderPath, false);
-      archive.finalize();
+  async createTarGz(folderPath, type = 'web') {
+    return new Promise(async (resolve, reject) => {
+      try {
+        const folderName = path.basename(folderPath);
+        const tarGzPath = path.join(process.cwd(), `${folderName}-${Date.now()}.tar.gz`);
+        
+        debug('Creating tar.gz file:', tarGzPath);
+        
+        // Create file filter
+        const archiveBasename = path.basename(tarGzPath);
+        const fileFilter = await this.createFileFilter(folderPath, archiveBasename, type);
+        
+        const output = createWriteStream(tarGzPath);
+        const archive = archiver('tar', {
+          gzip: true,
+          gzipOptions: {
+            level: 9, // Maximum compression
+            memLevel: 9
+          }
+        });
+        
+        output.on('close', () => {
+          debug(`Tar.gz created successfully: ${archive.pointer()} bytes`);
+          resolve(tarGzPath);
+        });
+        
+        archive.on('error', (err) => {
+          reject(new Error(`Tar.gz creation failed: ${err.message}`));
+        });
+        
+        archive.pipe(output);
+        
+        // Add files with filtering instead of entire directory
+        await this.addFilteredFiles(archive, folderPath, fileFilter);
+        
+        archive.finalize();
+      } catch (error) {
+        reject(error);
+      }
     });
+  }
+  
+  /**
+   * Recursively add files to archive with filtering
+   * @param {*} archive - Archiver instance
+   * @param {string} folderPath - Root folder path
+   * @param {Function} fileFilter - Filter function
+   * @param {string} currentPath - Current directory being processed
+   */
+  async addFilteredFiles(archive, folderPath, fileFilter, currentPath = folderPath) {
+    try {
+      const entries = await readdir(currentPath, { withFileTypes: true });
+      
+      for (const entry of entries) {
+        const fullPath = path.join(currentPath, entry.name);
+        const relativePath = path.relative(folderPath, fullPath);
+        
+        if (entry.isDirectory()) {
+          // For directories, check if the directory itself should be ignored
+          if (!fileFilter(fullPath)) {
+            debug('✗ Skipping directory:', relativePath);
+            continue; // Skip entire directory and all its contents
+          }
+          // If directory is not ignored, recursively process its contents
+          await this.addFilteredFiles(archive, folderPath, fileFilter, fullPath);
+        } else if (entry.isFile()) {
+          // For files, check if the file should be included
+          if (!fileFilter(fullPath)) {
+            continue; // Skip this file
+          }
+          // Add file to archive
+          archive.file(fullPath, { name: relativePath });
+          debug('Added file to archive:', relativePath);
+        }
+      }
+    } catch (error) {
+      throw new Error(`Failed to process directory ${currentPath}: ${error.message}`);
+    }
   }
   
   /**

@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.4.2] - 2025-08-25
+
+### Added
+- ✅ New deployment types: `node` and `nextjs`
+- ✅ Package.json validation for Node.js and Next.js deployments
+
+### Changed
+- ✅ Extended deployment types to include `node` and `nextjs` (in addition to `web`, `react`, and `static`)
+- 📦 Increased maximum upload/archive size to 100MB
+
+---
+
 ## [1.4.1] - 2025-08-16
 
 ### Changed

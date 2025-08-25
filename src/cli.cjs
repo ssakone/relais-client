@@ -25,7 +25,7 @@ const program = new Command();
 program
   .name('relais')
   .description('Node.js client for the relay tunnel service')
-  .version('1.4.1');
+  .version('1.4.2');
 
 program
   .command('set-token <token>')
@@ -44,7 +44,7 @@ program
 program
   .command('deploy [folder]')
   .description('🚀 Deploy a project folder to Relais platform (experimental)')
-  .option('-t, --type <type>', 'Deployment type (web, api, etc.)', 'web')
+  .option('-t, --type <type>', 'Deployment type (web, react, static, node)', 'web')
   .option('-d, --domain <domain>', 'Custom domain for deployment')
   .option('-f, --file <path>', 'Path to deploy config JSON (default: relais.json)')
   .option('-v, --verbose', 'Enable detailed logging')
@@ -65,6 +65,12 @@ program
         setDeployConfigFile(options.file);
       }
       const configExists = await hasDeployConfig();
+      
+      // Handle current directory specification
+      if (deployFolder === '.') {
+        deployFolder = process.cwd();
+        debug('Using current directory:', deployFolder);
+      }
       
       // If no folder specified, try to load from config
       if (!deployFolder) {
