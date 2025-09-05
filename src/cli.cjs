@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
-const { Command } = require('commander');
-const path = require('path');
-const url = require('url');
+// Load Commander via dynamic import to support ESM-only package in CommonJS context
+(async () => {
+  const { Command } = await import('commander');
 
 // Default configuration
 const DEFAULT_SERVER = 'tcp.relais.dev:1080';
@@ -20,7 +20,7 @@ let errorWithTimestamp = (...args) => {
   console.error(`[${timestamp}]`, ...args);
 };
 
-const program = new Command();
+  const program = new Command();
 
 program
   .name('relais')
@@ -266,4 +266,9 @@ program
     }
   });
 
-program.parse();
+  program.parse();
+})().catch((err) => {
+  const timestamp = new Date().toISOString();
+  console.error(`[${timestamp}]`, 'CLI initialization failed:', (err && err.message) ? err.message : err);
+  process.exit(1);
+});
