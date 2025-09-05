@@ -147,7 +147,7 @@ program
   .command('tunnel')
   .description('Create a tunnel to expose local services')
   .option('-s, --server <address>', 'Relay server address', DEFAULT_SERVER)
-  .option('-h, --host <host>', 'Local service host', 'localhost')
+  .option('-H, --host <host>', 'Local service host', 'localhost')
   .option('-p, --port <port>', 'Local service port')
   .option('-k, --token <token>', 'Authentication token (optional)')
   .option('-d, --domain <domain>', 'Custom domain')
