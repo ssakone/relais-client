@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 
-// Load Commander via dynamic import to support ESM-only package in CommonJS context
-(async () => {
-  const { Command } = await import('commander');
+// Use require for commander to work with pkg bundling
+const { Command } = require('commander');
 
 // Default configuration
 const DEFAULT_SERVER = 'tcp.relais.dev:1080';
@@ -266,9 +265,4 @@ program
     }
   });
 
-  program.parse();
-})().catch((err) => {
-  const timestamp = new Date().toISOString();
-  console.error(`[${timestamp}]`, 'CLI initialization failed:', (err && err.message) ? err.message : err);
-  process.exit(1);
-});
+program.parse();
