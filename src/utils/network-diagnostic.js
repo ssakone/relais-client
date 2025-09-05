@@ -208,7 +208,7 @@ async function runDiagnostics() {
 // Run diagnostics if called directly
 if (typeof require !== 'undefined' && require.main === module) {
   runDiagnostics().catch(console.error);
-} else if (typeof import !== 'undefined' && import.meta && import.meta.url === `file://${process.argv[1]}`) {
+} else if (typeof process !== 'undefined' && process.argv[1] && process.argv[1].endsWith('network-diagnostic.js')) {
   runDiagnostics().catch(console.error);
 }
 
