@@ -47,11 +47,13 @@
     ],
     "outputPath": "dist",
     "scripts": [
-      "src/**/*.js"
+      "src/**/*.js",
+      "src/**/*.cjs"
     ],
     "assets": [
       "README.md",
-      "CHANGELOG.md"
+      "CHANGELOG.md",
+      "src/**/*.js"
     ],
     "options": [
       "--no-bytecode",
