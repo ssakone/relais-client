@@ -2,13 +2,13 @@
   "name": "relais",
   "version": "1.4.2",
   "description": "Node.js client for the relay tunnel service - Agent mode with persistent reconnection for network resilience",
-  "main": "src/cli.cjs",
+  "main": "src/cli-wrapper.js",
   "type": "module",
   "bin": {
-    "relais": "src/cli.cjs"
+    "relais": "src/cli-wrapper.js"
   },
   "scripts": {
-    "start": "node src/cli.cjs",
+    "start": "node src/cli-wrapper.js",
     "pkg:win": "pkg . --targets node18-win-x64 --output dist/relais.exe --no-bytecode --public-packages '*'",
     "pkg:all": "pkg . --targets node18-win-x64,node18-linux-x64,node18-macos-x64 --output dist/relais --no-bytecode --public-packages '*'"
   },
@@ -47,8 +47,7 @@
     ],
     "outputPath": "dist",
     "scripts": [
-      "src/**/*.js",
-      "src/**/*.cjs"
+      "src/**/*.js"
     ],
     "assets": [
       "README.md",
