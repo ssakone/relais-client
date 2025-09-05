@@ -206,7 +206,9 @@ async function runDiagnostics() {
 }
 
 // Run diagnostics if called directly
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (typeof require !== 'undefined' && require.main === module) {
+  runDiagnostics().catch(console.error);
+} else if (typeof import !== 'undefined' && import.meta && import.meta.url === `file://${process.argv[1]}`) {
   runDiagnostics().catch(console.error);
 }
 
