@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
-// Use require for commander to work with pkg bundling
 const { Command } = require('commander');
+const path = require('path');
+const url = require('url');
 
 // Default configuration
 const DEFAULT_SERVER = 'tcp.relais.dev:1080';
@@ -19,7 +20,7 @@ let errorWithTimestamp = (...args) => {
   console.error(`[${timestamp}]`, ...args);
 };
 
-  const program = new Command();
+const program = new Command();
 
 program
   .name('relais')
@@ -146,7 +147,7 @@ program
   .command('tunnel')
   .description('Create a tunnel to expose local services')
   .option('-s, --server <address>', 'Relay server address', DEFAULT_SERVER)
-  .option('-H, --host <host>', 'Local service host', 'localhost')
+  .option('-h, --host <host>', 'Local service host', 'localhost')
   .option('-p, --port <port>', 'Local service port')
   .option('-k, --token <token>', 'Authentication token (optional)')
   .option('-d, --domain <domain>', 'Custom domain')
