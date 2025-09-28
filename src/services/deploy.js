@@ -136,9 +136,9 @@ export class DeployService {
     
     try {
       // Validate deployment type
-      const allowedTypes = new Set(['web', 'react', 'static', 'node']);
+      const allowedTypes = new Set(['web', 'react', 'static', 'node', 'nest']);
       if (!allowedTypes.has(type)) {
-        throw new Error(`Invalid deployment type: ${type}. Allowed types: web, react, static, node`);
+        throw new Error(`Invalid deployment type: ${type}. Allowed types: web, react, static, node, nest`);
       }
 
       // Validate folder exists
@@ -225,12 +225,12 @@ export class DeployService {
         throw new Error(`${folderPath} is not a directory`);
       }
       
-      // For Node.js deployments, check that package.json exists
-      if (type === 'node') {
+      // For Node.js and NestJS deployments, check that package.json exists
+      if (type === 'node' || type === 'nest') {
         const packageJsonPath = path.join(folderPath, 'package.json');
         try {
           await access(packageJsonPath);
-          debug('package.json validation passed for Node.js deployment');
+          debug(`package.json validation passed for ${type} deployment`);
         } catch (error) {
           throw new Error(`${type} deployment requires a package.json file in the project folder`);
         }
