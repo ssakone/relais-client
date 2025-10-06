@@ -1,0 +1,304 @@
+#!/usr/bin/env node
+
+// Version standalone pour pkg - évite les imports dynamiques
+const { Command } = require('commander');
+const path = require('path');
+
+// Default configuration
+const DEFAULT_SERVER = 'tcp.relais.dev:1080';
+const DEFAULT_PROTOCOL = 'http';
+
+let debug = (...args) => {
+  if (process.env.DEBUG) {
+    const timestamp = new Date().toISOString();
+    console.log(`[${timestamp}]`, ...args);
+  }
+};
+
+let errorWithTimestamp = (...args) => {
+  const timestamp = new Date().toISOString();
+  console.error(`[${timestamp}]`, ...args);
+};
+
+const program = new Command();
+
+program
+  .name('relais')
+  .description('Node.js client for the relay tunnel service')
+  .version('1.4.2');
+
+program
+  .command('set-token <token>')
+  .description('Save an authentication token for future use')
+  .action(async (token) => {
+    try {
+      const configModule = require('./utils/config.js');
+      await configModule.saveToken(token);
+      console.log('Token saved successfully');
+    } catch (err) {
+      errorWithTimestamp('Error saving token:', err.message);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('check-token')
+  .description('Check the currently saved authentication token')
+  .action(async () => {
+    try {
+      const configModule = require('./utils/config.js');
+      const token = await configModule.loadToken();
+      const preview = token.length > 8 ? token.substring(0, 4) + '...' + token.substring(token.length - 4) : token;
+      console.log('✅ Token found:', preview);
+    } catch (err) {
+      errorWithTimestamp('❌ Token check failed:', err.message);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('debug-config')
+  .description('Debug configuration and permissions (Linux troubleshooting)')
+  .action(async () => {
+    try {
+      const configModule = require('./utils/config.js');
+      console.log('🔍 Configuration diagnostics:');
+      
+      const configDir = await configModule.getConfigDir();
+      console.log('📁 Config directory:', configDir);
+      
+      console.log('✅ Configuration check completed');
+    } catch (err) {
+      errorWithTimestamp('❌ Configuration check failed:', err.message);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('deploy [folder]')
+  .description('🚀 Deploy a project folder to Relais platform (experimental)')
+  .option('-t, --type <type>', 'Deployment type (web, react, static, node, nextjs)', 'web')
+  .option('-d, --domain <domain>', 'Custom domain for deployment')
+  .option('-f, --file <path>', 'Path to deploy config JSON (default: relais.json)')
+  .option('-v, --verbose', 'Enable detailed logging')
+  .action(async (folder, options) => {
+    if (options.verbose) {
+      process.env.DEBUG = 'true';
+    }
+
+    try {
+      let deployFolder = folder;
+      let deployType = options.type;
+      let deployDomain = options.domain;
+      let isUpdate = false;
+      
+      // Configure and check deploy config file to determine if this is an update
+      const deployConfigModule = require('./utils/deploy-config.js');
+      
+      if (options.file) {
+        deployConfigModule.setDeployConfigFile(options.file);
+      }
+      const configExists = await deployConfigModule.hasDeployConfig();
+      
+      // Handle current directory specification
+      if (deployFolder === '.') {
+        deployFolder = process.cwd();
+        debug('Using current directory:', deployFolder);
+      }
+      
+      // If no folder specified, try to load from config
+      if (!deployFolder) {
+        if (configExists) {
+          const config = await deployConfigModule.loadDeployConfig();
+          if (config) {
+            deployFolder = config.folder;
+            deployType = config.type;
+            // Only use saved domain if no domain was specified via CLI
+            if (!deployDomain) {
+              deployDomain = config.domain;
+            }
+            isUpdate = true;
+            debug(`Using saved configuration (UPDATE MODE)`);
+            debug(`Folder: ${deployFolder}`);
+            debug(`Type: ${deployType}`);
+            debug(`Domain: ${deployDomain || 'None'}`);
+            if (options.domain && options.domain !== config.domain) {
+              debug(`Domain changed from: ${config.domain || 'None'} to: ${options.domain}`);
+            }
+            debug(`Last deployment: ${config.lastDeployed || 'Unknown'}`);
+          } else {
+            errorWithTimestamp('No folder specified and no saved configuration found.');
+            console.log('Usage: relais deploy <folder> or save a configuration first.');
+            process.exit(1);
+          }
+        } else {
+          errorWithTimestamp('No folder specified and no saved configuration found.');
+          console.log('Usage: relais deploy <folder> or save a configuration first.');
+          process.exit(1);
+        }
+      } else {
+        // Folder was specified, check if we should update existing config
+        if (configExists) {
+          const config = await deployConfigModule.loadDeployConfig();
+          if (config && config.folder === deployFolder) {
+            isUpdate = true;
+            // Only use saved domain if no domain was specified via CLI
+            if (!deployDomain) {
+              deployDomain = config.domain;
+            }
+            debug('Existing configuration found for this folder - UPDATE MODE');
+            if (options.domain && options.domain !== config.domain) {
+              debug(`Domain changed from: ${config.domain || 'None'} to: ${options.domain}`);
+            }
+          } else {
+            debug('Existing configuration found but for different folder - CREATE MODE');
+          }
+        }
+      }
+      
+      debug('Starting deployment...');
+      debug(`Folder: ${deployFolder}`);
+      debug(`Type: ${deployType}`);
+      if (deployDomain) debug(`Domain: ${deployDomain}`);
+      debug(`Mode: ${isUpdate ? 'UPDATE' : 'CREATE'}`);
+      
+      const deployModule = require('./services/deploy.js');
+      const result = await deployModule.deployService.deploy(deployFolder, deployType, isUpdate, deployDomain);
+      
+      debug('Upload successful.');
+      debug('Waiting for deployment status...');
+      
+      // Poll deployment status after showing upload success
+      await deployModule.deployService.pollDeploymentStatus(result.id);
+      
+    } catch (error) {
+      errorWithTimestamp('Deployment failed:', error.message);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('tunnel')
+  .description('Create a tunnel to expose local services')
+  .option('-s, --server <address>', 'Relay server address', DEFAULT_SERVER)
+  .option('-h, --host <host>', 'Local service host', 'localhost')
+  .option('-p, --port <port>', 'Local service port')
+  .option('-k, --token <token>', 'Authentication token (optional)')
+  .option('-d, --domain <domain>', 'Custom domain')
+  .option('-r, --remote <port>', 'Desired remote port')
+  .option('-t, --type <type>', 'Protocol type (http or tcp)', DEFAULT_PROTOCOL)
+  .option('--timeout <seconds>', 'Tunnel establishment timeout in seconds', '30')
+  .option('--restart-interval <minutes>', 'Tunnel restart interval in minutes', '30')
+  .option('-v, --verbose', 'Enable detailed logging')
+  .action(async (options) => {
+    if (options.verbose) {
+      process.env.DEBUG = 'true';
+    }
+
+    const configModule = require('./utils/config.js');
+    const tunnelModule = require('./tunnel/tunnel-service.js');
+
+    debug('Configuration:', {
+      server: options.server,
+      host: options.host,
+      port: options.port,
+      type: options.type,
+      domain: options.domain,
+      remote: options.remote,
+      timeout: options.timeout,
+      restartInterval: options.restartInterval
+    });
+
+    if (!options.port) {
+      errorWithTimestamp('Error: Local port is required');
+      process.exit(1);
+    }
+
+    // Try to load token if not provided but don't require it
+    if (!options.token) {
+      try {
+        options.token = await configModule.loadToken();
+        debug('Token loaded from configuration');
+      } catch (err) {
+        debug('No token found, continuing without token');
+      }
+    }
+
+    // Import failure tracker for persistent connection
+    const failureTrackerModule = require('./utils/failure-tracker.js');
+    const failureTracker = new failureTrackerModule.ConnectionFailureTracker();
+    debug('Mode agent activé - Reconnexion persistante en cas d\'erreur réseau');
+
+    while (true) {
+      try {
+        // Agent mode: Never stop reconnecting for network errors, only for authentication issues
+        await tunnelModule.connectAndServe(options, failureTracker);
+        
+        // Reset failure tracker on successful connection
+        failureTracker.reset();
+        failureTracker.recordSuccessfulConnection();
+        
+      } catch (err) {
+        if (err.message.includes('Token') || err.message.includes('Authentication')) {
+          errorWithTimestamp('This service requires authentication. Use -k <token> or the set-token command');
+          process.exit(1);
+        }
+
+        // Handle health monitor connection loss specifically
+        if (err.message.includes('Connection lost due to server health check failure')) {
+          errorWithTimestamp('Connexion fermée par le monitoring de santé - Attente du rétablissement...');
+          
+          // Create a temporary health monitor to wait for server recovery
+          const healthMonitorModule = require('./utils/health-monitor.js');
+          const tempHealthMonitor = new healthMonitorModule.HealthMonitor();
+          await tempHealthMonitor.waitForServerRecovery();
+          tempHealthMonitor.stop();
+          
+          debug('Serveur rétabli - Reprise de la connexion tunnel...');
+          // Continue to reconnect immediately without backoff
+          continue;
+        }
+
+        // Handle tunnel establishment timeout specifically
+        if (err.message.includes('Tunnel establishment timeout')) {
+          const timeoutMatch = err.message.match(/(\d+) seconds/);
+          const timeoutSeconds = timeoutMatch ? timeoutMatch[1] : '30';
+          errorWithTimestamp(`⏱️  Établissement du tunnel trop lent (>${timeoutSeconds}s) - Nouvelle tentative...`);
+          
+          // Immediate retry for timeout, no backoff
+          continue;
+        }
+
+        if (err.message.includes('Tunnel restart interval reached')) {
+          debug('Redémarrage périodique du tunnel');
+          failureTracker.reset();
+          continue;
+        }
+
+        // Determine error type and handle accordingly
+        if (err.message.includes('Connection closed by server')) {
+          failureTracker.recordServerClosure();
+          const backoffDuration = failureTracker.getBackoffDuration();
+          errorWithTimestamp(`Server closed connection: ${err.message}; reconnecting in ${backoffDuration}ms...`);
+          await new Promise(resolve => setTimeout(resolve, backoffDuration));
+        } else if (failureTracker.isNetworkError(err)) {
+          // Network errors - continue trying indefinitely with backoff
+          failureTracker.recordNetworkError();
+
+          const backoffDuration = failureTracker.getBackoffDuration();
+          errorWithTimestamp(`Network error: ${err.message}; reconnecting in ${backoffDuration}ms...`);
+          await new Promise(resolve => setTimeout(resolve, backoffDuration));
+        } else {
+          // Other errors - treat as network errors for agent mode
+          failureTracker.recordNetworkError();
+
+          const backoffDuration = failureTracker.getBackoffDuration();
+          errorWithTimestamp(`Connection error: ${err.message}; reconnecting in ${backoffDuration}ms...`);
+          await new Promise(resolve => setTimeout(resolve, backoffDuration));
+        }
+      }
+    }
+  });
+
+program.parse();
+

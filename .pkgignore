@@ -1,0 +1,42 @@
+# Ignore files that shouldn't be packaged into the executable
+
+# Test files
+tests/
+*.test.js
+*.spec.js
+
+# Documentation
+*.md
+README.md
+CHANGELOG.md
+OPTIMIZATIONS.md
+
+# Git files
+.git/
+.gitignore
+
+# Build artifacts
+dist/
+node_modules/.cache/
+*.log
+
+# Development files
+.env
+.env.*
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Temporary files
+*.tmp
+*.temp
+
+# Archives
+*.tar.gz
+*.zip
+
+# Config files that may contain sensitive data
+relais.json

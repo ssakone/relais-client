@@ -47,6 +47,49 @@ cd node-client
 npm install -g relais
 ```
 
+## 🏗️ Build Standalone Executables
+
+Create standalone executables that don't require Node.js to be installed on the target system.
+
+### Quick Build (Windows)
+```cmd
+build-windows.bat
+```
+
+### Interactive Build (Linux/macOS)
+```bash
+./build-executable.sh
+```
+
+### Manual Build Commands
+```bash
+# Build for specific platforms
+npm run build:win      # Windows (.exe)
+npm run build:linux    # Linux 
+npm run build:macos    # macOS
+npm run build:all      # All platforms
+
+# Windows only (faster)
+npm run build:win-only
+```
+
+### Using Executables
+```bash
+# Windows
+dist/relais-win.exe tunnel -p 3000
+dist/relais-win.exe deploy ./my-app
+
+# Linux/macOS  
+./dist/relais-linux tunnel -p 3000
+./dist/relais-macos deploy ./my-app
+```
+
+**Benefits:**
+- ✅ No Node.js installation required
+- ✅ Single file deployment (~37MB)
+- ✅ Same functionality as Node.js version
+- ✅ Perfect for CI/CD and server deployments
+
 ## Usage
 
 ### Deploy a project
