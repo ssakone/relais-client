@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.3] - 2025-09-05
+
+### Deprecated
+- ⚠️ `deploy` command is now deprecated and hidden from CLI help while remaining functional
+
+---
+
 ## [1.4.2] - 2025-08-25
 
 ### Added

@@ -4,15 +4,12 @@ A Node.js client for the relay tunnel service, allowing you to expose local serv
 
 ## 🆕 What's New in v1.4.2
 
-- ✅ **New deployment types**: Added support for `node` and `nextjs` deployments
-- ✅ **Package.json validation**: Node.js and Next.js deployments now require a package.json file
-- ✅ **Deploy type restrictions**: Allowed types are now `web`, `react`, `static`, `node`, and `nextjs`
 - 📦 **Larger uploads**: Max archive size increased to 100MB
 - ✨ Terminal animations and server simplification from v1.4.0 retained
 
 ## Previous (v1.4.0)
 
-- ✨ **Terminal animations**: Clear visual feedback with animated steps for connecting, establishing tunnels, uploads, and deployment status (uses `chalk`)
+- ✨ **Terminal animations**: Clear visual feedback with animated steps for connecting, establishing tunnels, uploads, and status monitoring (uses `chalk`)
 - 🌐 **Server address simplified**: Always uses `tcp.relais.dev:1080` (failover and old IP/ports removed)
 - 📝 **Docs & CLI**: Updated defaults and messages to reflect the new server and animations
 
@@ -77,34 +74,18 @@ npm run build:win-only
 ```bash
 # Windows
 dist/relais-win.exe tunnel -p 3000
-dist/relais-win.exe deploy ./my-app
 
-# Linux/macOS  
+# Linux/macOS
 ./dist/relais-linux tunnel -p 3000
-./dist/relais-macos deploy ./my-app
 ```
 
 **Benefits:**
 - ✅ No Node.js installation required
-- ✅ Single file deployment (~37MB)
+- ✅ Single file distribution (~37MB)
 - ✅ Same functionality as Node.js version
-- ✅ Perfect for CI/CD and server deployments
+- ✅ Perfect for CI/CD and server usage
 
 ## Usage
-
-### Deploy a project
-
-```bash
-relais deploy [folder] [-t web|react|static|node|nextjs] [-d domain] [-f config.json] [-v]
-```
-
-Options:
-- `-t, --type <type>` : Deployment type (allowed: web, react, static, node, nextjs; default: web)
-- `-d, --domain <domain>` : Custom domain
-- `-f, --file <path>` : Path to deploy config JSON (default: `relais.json`)
-- `-v, --verbose` : Detailed logging
-
-Note: Node.js and Next.js deployments require a `package.json` file in the project folder.
 
 ### Save a token
 

@@ -25,7 +25,7 @@ const program = new Command();
 program
   .name('relais')
   .description('Node.js client for the relay tunnel service')
-  .version('1.5.0');
+  .version('1.5.1');
 
 program
   .command('set-token <token>')
@@ -42,7 +42,7 @@ program
   });
 
 program
-  .command('deploy [folder]')
+  .command('deploy [folder]', { hidden: true })
   .description('🚀 Deploy a project folder to Relais platform (experimental)')
   .option('-t, --type <type>', 'Deployment type (web, react, static, node, nest)', 'web')
   .option('-d, --domain <domain>', 'Custom domain for deployment')
