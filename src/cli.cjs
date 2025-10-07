@@ -42,7 +42,7 @@ program
   });
 
 program
-  .command('deploy [folder]')
+  .command('deploy [folder]', { hidden: true })
   .description('🚀 Deploy a project folder to Relais platform (experimental)')
   .option('-t, --type <type>', 'Deployment type (web, react, static, node, nest)', 'web')
   .option('-d, --domain <domain>', 'Custom domain for deployment')
