@@ -2,10 +2,14 @@
   "name": "relais",
   "version": "1.5.1",
   "description": "Node.js client for the relay tunnel service - Agent mode with persistent reconnection for network resilience",
-  "main": "src/cli.cjs",
+  "main": "src/api/index.js",
   "type": "module",
   "bin": {
     "relais": "src/cli.cjs"
+  },
+  "exports": {
+    ".": "./src/api/index.js",
+    "./cli": "./src/cli.cjs"
   },
   "scripts": {
     "start": "node src/cli.cjs",
