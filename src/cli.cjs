@@ -155,6 +155,8 @@ program
   .option('-t, --type <type>', 'Protocol type (http or tcp)', DEFAULT_PROTOCOL)
   .option('--timeout <seconds>', 'Tunnel establishment timeout in seconds', '30')
   .option('--restart-interval <minutes>', 'Tunnel restart interval in minutes', '30')
+  .option('--persistent', 'Enable persistent reconnection on network failures (default: true)')
+  .option('--no-persistent', 'Disable persistent reconnection')
   .option('-v, --verbose', 'Enable detailed logging')
   .action(async (options) => {
     if (options.verbose) {
@@ -217,7 +219,8 @@ program
           // Create a temporary health monitor to wait for server recovery
           const { HealthMonitor } = await import('./utils/health-monitor.js');
           const tempHealthMonitor = new HealthMonitor();
-          await tempHealthMonitor.waitForServerRecovery();
+          // IMPORTANT: forceCheck=true pour toujours vérifier même si currentlyDown=false
+          await tempHealthMonitor.waitForServerRecovery(true);
           tempHealthMonitor.stop();
           
           debug('Serveur rétabli - Reprise de la connexion tunnel...');

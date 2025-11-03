@@ -282,6 +282,11 @@ export async function connectAndServe(options, failureTracker = null) {
     decoder = result.decoder;
     response = result.response;
 
+    // Notify caller that connection is established (for stop functionality)
+    if (options.onConnectionEstablished && typeof options.onConnectionEstablished === 'function') {
+      options.onConnectionEstablished(ctrlConn);
+    }
+
     // Display tunnel URL (keep user-facing)
     const publicAddr = response.public_addr;
     if (options.type === 'http') {
@@ -436,6 +441,11 @@ export async function connectAndServe(options, failureTracker = null) {
  */
 export async function runTunnel(options) {
   const failureTracker = new ConnectionFailureTracker();
+  const isPersistent = options.persistent !== false; // Default to true
+  
+  if (isPersistent) {
+    debug('Mode persistance activé - Reconnexion automatique en cas de panne réseau');
+  }
   
   while (true) {
     try {
@@ -448,11 +458,17 @@ export async function runTunnel(options) {
     } catch (err) {
       // Handle health monitor connection loss specifically
       if (err.message.includes('Connection lost due to server health check failure')) {
+        if (!isPersistent) {
+          // Si pas en mode persistant, propager l'erreur
+          throw err;
+        }
+        
         errorWithTimestamp('Connexion fermée par le monitoring de santé - Attente du rétablissement...');
         
         // Create a temporary health monitor to wait for server recovery
         const tempHealthMonitor = new HealthMonitor();
-        await tempHealthMonitor.waitForServerRecovery();
+        // IMPORTANT: forceCheck=true pour toujours vérifier même si currentlyDown=false
+        await tempHealthMonitor.waitForServerRecovery(true);
         tempHealthMonitor.stop();
         
         debug('Serveur rétabli - Reprise de la connexion tunnel...');

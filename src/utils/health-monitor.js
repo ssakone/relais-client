@@ -191,11 +191,33 @@ export class HealthMonitor {
 
   /**
    * Attendeur qui bloque jusqu'à ce que le serveur soit de nouveau accessible
+   * Effectue toujours au moins une vérification initiale pour garantir que le serveur est vraiment UP
+   * @param {boolean} forceCheck - Si true, effectue une vérification même si currentlyDown est false
    * @returns {Promise<void>}
    */
-  async waitForServerRecovery() {
-    if (!this.currentlyDown) {
-      return; // Le serveur est déjà accessible
+  async waitForServerRecovery(forceCheck = true) {
+    debug('Vérification de l\'état du serveur avant reconnexion...');
+    
+    // Toujours effectuer au moins une vérification initiale pour être sûr
+    if (forceCheck || this.currentlyDown) {
+      const initialCheck = await this.checkServerHealth();
+      
+      if (initialCheck) {
+        debug('Serveur accessible - Reconnexion autorisée');
+        this.handleHealthyResponse();
+        return;
+      }
+      
+      // Si la vérification initiale échoue, marquer comme down et attendre
+      if (!this.currentlyDown) {
+        this.currentlyDown = true;
+        this.lastSuccessTime = Date.now() - this.failureThreshold; // Marquer comme down depuis le début
+        errorWithTimestamp('🚨 Serveur inaccessible - Attente du rétablissement...');
+      }
+    } else if (!this.currentlyDown) {
+      // Si pas de force check et pas down, on considère que c'est OK
+      debug('Serveur considéré accessible (pas de vérification forcée)');
+      return;
     }
 
     debug('Attente du rétablissement du serveur...');
@@ -207,10 +229,19 @@ export class HealthMonitor {
           if (isHealthy) {
             clearInterval(checkRecovery);
             this.handleHealthyResponse();
+            debug('✅ Serveur rétabli - Reprise de la connexion');
             resolve();
+          } else {
+            // Afficher un message toutes les 10 vérifications (~30s avec checkInterval de 3s)
+            const checkCount = Math.floor((Date.now() - this.lastSuccessTime) / this.checkInterval);
+            if (checkCount % 10 === 0) {
+              const waitTime = Math.round((Date.now() - (this.lastSuccessTime + this.failureThreshold)) / 1000);
+              errorWithTimestamp(`⏳ Serveur toujours inaccessible - En attente depuis ${waitTime}s...`);
+            }
           }
         } catch (error) {
           // Continue d'attendre
+          debug('Erreur lors de la vérification de santé:', error.message);
         }
       }, this.checkInterval);
     });

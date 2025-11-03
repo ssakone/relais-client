@@ -10,7 +10,7 @@ import { saveToken, loadToken } from '../utils/config.js';
 import { ConnectionFailureTracker } from '../utils/failure-tracker.js';
 
 /**
- * Create a tunnel to expose a local service
+ * Create a tunnel to expose a local service with event callbacks
  *
  * @param {Object} options - Tunnel options
  * @param {string} options.port - Local service port (required)
@@ -22,16 +22,23 @@ import { ConnectionFailureTracker } from '../utils/failure-tracker.js';
  * @param {string} [options.token] - Authentication token
  * @param {string} [options.timeout='30'] - Tunnel establishment timeout in seconds
  * @param {string} [options.restartInterval='30'] - Tunnel restart interval in minutes
+ * @param {boolean} [options.persistent=true] - Enable persistent reconnection on network failures
  * @param {boolean} [options.verbose=false] - Enable detailed logging
- * @returns {Promise<Object>} Tunnel information
+ * @param {Function} [options.onConnecting] - Callback when connecting (host, port)
+ * @param {Function} [options.onConnected] - Callback when connected (duration)
+ * @param {Function} [options.onTunnelReady] - Callback when tunnel is ready (url, publicAddr)
+ * @param {Function} [options.onLog] - Callback for log messages (message, level)
+ * @param {Function} [options.onError] - Callback for errors (error)
+ * @returns {Promise<Object>} Tunnel control object with stop() method
  *
  * @example
  * const tunnel = await createTunnel({
  *   port: '3000',
  *   type: 'http',
- *   verbose: true
+ *   persistent: true,
+ *   onTunnelReady: (url) => console.log('Tunnel URL:', url),
+ *   onLog: (msg) => console.log('Log:', msg),
  * });
- * console.log('Tunnel URL:', tunnel.url);
  */
 export async function createTunnel(options) {
   // Set defaults
@@ -41,6 +48,7 @@ export async function createTunnel(options) {
     type: 'http',
     timeout: '30',
     restartInterval: '30',
+    persistent: true,
     verbose: false,
     ...options
   };
@@ -64,18 +72,84 @@ export async function createTunnel(options) {
     }
   }
 
+  // Intercept console.log pour capturer les logs
+  const originalConsoleLog = console.log;
+  const originalConsoleError = console.error;
+
+  if (tunnelOptions.onLog) {
+    console.log = (...args) => {
+      const message = args.join(' ');
+
+      // Détecter le message de tunnel actif
+      if (message.includes('🚀 Tunnel active!')) {
+        // Match HTTP, HTTPS, and TCP URLs
+        const urlMatch = message.match(/(https?|tcp):\/\/[^\s]+/);
+        if (urlMatch && tunnelOptions.onTunnelReady) {
+          // Generate a unique tunnelId based on options if not provided
+          const tunnelId = tunnelOptions.tunnelId || `tunnel-${tunnelOptions.port}-${Date.now()}`;
+          tunnelOptions.onTunnelReady(urlMatch[0], tunnelId);
+        }
+      }
+
+      tunnelOptions.onLog(message, 'info');
+      originalConsoleLog(...args);
+    };
+  }
+
+  if (tunnelOptions.onError) {
+    console.error = (...args) => {
+      const message = args.join(' ');
+      tunnelOptions.onError(new Error(message));
+      originalConsoleError(...args);
+    };
+  }
+
+  let shouldStop = false;
+  let controlConnection = null;
   const failureTracker = new ConnectionFailureTracker();
 
-  try {
-    await connectAndServe(tunnelOptions, failureTracker);
+  // Add a callback to capture the control connection once established
+  tunnelOptions.onConnectionEstablished = (ctrlConn) => {
+    controlConnection = ctrlConn;
+  };
 
-    return {
-      success: true,
-      message: 'Tunnel created successfully'
-    };
-  } catch (err) {
-    throw new Error(`Failed to create tunnel: ${err.message}`);
-  }
+  // Lancer le tunnel en arrière-plan
+  const tunnelPromise = (async () => {
+    try {
+      await connectAndServe(tunnelOptions, failureTracker);
+    } catch (err) {
+      if (tunnelOptions.onError && !shouldStop) {
+        tunnelOptions.onError(err);
+      }
+      throw err;
+    } finally {
+      // Restaurer console
+      console.log = originalConsoleLog;
+      console.error = originalConsoleError;
+    }
+  })();
+
+  // Retourner immédiatement avec un objet de contrôle
+  return {
+    stop: () => {
+      shouldStop = true;
+      
+      // Force stop the tunnel by destroying the control connection
+      if (controlConnection) {
+        try {
+          console.log('Stopping tunnel by destroying control connection');
+          controlConnection.destroy();
+        } catch (err) {
+          console.error('Error destroying control connection:', err);
+        }
+      }
+      
+      // Restaurer console immédiatement
+      console.log = originalConsoleLog;
+      console.error = originalConsoleError;
+    },
+    promise: tunnelPromise
+  };
 }
 
 /**
@@ -83,12 +157,14 @@ export async function createTunnel(options) {
  * This function will continuously try to reconnect if the connection is lost
  *
  * @param {Object} options - Same as createTunnel options
+ * @param {boolean} [options.persistent=true] - Enable persistent reconnection (always true for this function)
  * @returns {Promise<void>} Never resolves (runs indefinitely)
  *
  * @example
  * await createPersistentTunnel({
  *   port: '3000',
- *   type: 'http'
+ *   type: 'http',
+ *   persistent: true
  * });
  */
 export async function createPersistentTunnel(options) {
@@ -99,6 +175,7 @@ export async function createPersistentTunnel(options) {
     type: 'http',
     timeout: '30',
     restartInterval: '30',
+    persistent: true,
     verbose: false,
     ...options
   };
