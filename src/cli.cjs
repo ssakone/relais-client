@@ -154,7 +154,9 @@ program
   .option('-r, --remote <port>', 'Desired remote port')
   .option('-t, --type <type>', 'Protocol type (http or tcp)', DEFAULT_PROTOCOL)
   .option('--timeout <seconds>', 'Tunnel establishment timeout in seconds', '30')
-  .option('--restart-interval <minutes>', 'Tunnel restart interval in minutes', '30')
+  .option('--health-check', 'Enable tunnel health checking (default: enabled)', true)
+  .option('--no-health-check', 'Disable tunnel health checking')
+  .option('--health-check-interval <seconds>', 'Health check interval in seconds', '30')
   .option('-v, --verbose', 'Enable detailed logging')
   .action(async (options) => {
     if (options.verbose) {
@@ -172,7 +174,8 @@ program
       domain: options.domain,
       remote: options.remote,
       timeout: options.timeout,
-      restartInterval: options.restartInterval
+      healthCheck: options.healthCheck,
+      healthCheckInterval: options.healthCheckInterval
     });
 
     if (!options.port) {
@@ -235,9 +238,11 @@ program
           continue;
         }
 
-        if (err.message.includes('Tunnel restart interval reached')) {
-          debug('Redémarrage périodique du tunnel');
+        // Handle tunnel health check triggered reconnection
+        if (err.message.includes('Tunnel health check triggered reconnection')) {
+          errorWithTimestamp('🔄 Reconnexion du tunnel déclenchée par la vérification de santé...');
           failureTracker.reset();
+          // Immediate retry without backoff
           continue;
         }
 

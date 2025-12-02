@@ -4,6 +4,7 @@ import { setKeepAlive, setNoDelay, handleNewConnection, optimizeSocket } from '.
 import { debug, errorWithTimestamp } from '../utils/debug.js';
 import { ConnectionFailureTracker } from '../utils/failure-tracker.js';
 import { HealthMonitor } from '../utils/health-monitor.js';
+import { TunnelHealthChecker } from '../utils/tunnel-health-checker.js';
 import { createSpinner } from '../utils/terminal-spinner.js';
 
 // Utility function to read a complete JSON message from socket
@@ -112,17 +113,6 @@ function startHeartbeatMonitoring(socket, lastHeartbeatReceived) {
 
 export async function connectAndServe(options, failureTracker = null) {
   debug('Starting tunnel service');
-
-  // Validate and use user-defined restart interval or default to 30 minutes
-  let restartIntervalMinutes = parseInt(options.restartInterval);
-  if (isNaN(restartIntervalMinutes) || restartIntervalMinutes < 1 || restartIntervalMinutes > 1440) {
-    if (options.restartInterval && options.restartInterval !== '30') {
-      debug(`Invalid restart interval value: ${options.restartInterval}, using default of 30 minutes`);
-      errorWithTimestamp(`⚠️  Invalid restart interval value: ${options.restartInterval}. Using default of 30 minutes. Valid range: 1-1440 minutes.`);
-    }
-    restartIntervalMinutes = 30;
-  }
-  const RESTART_INTERVAL_MS = restartIntervalMinutes * 60 * 1000;
   
   // Validate and use user-defined timeout or default to 30 seconds
   let timeoutSeconds = parseInt(options.timeout);
@@ -274,7 +264,8 @@ export async function connectAndServe(options, failureTracker = null) {
   let ctrlConn, decoder, response;
   let healthMonitor = null;
   let isHealthMonitorConnLost = false;
-  let restartTimer;
+  let tunnelHealthChecker = null;
+  let tunnelHealthCheckTriggeredReconnect = false;
   
   try {
     const result = await Promise.race([establishmentPromise, timeoutPromise]);
@@ -319,26 +310,53 @@ export async function connectAndServe(options, failureTracker = null) {
 
     debug('Monitoring de santé du serveur activé (vérification toutes les 3s)');
 
-    // Log restart interval configuration
-    debug(`Redémarrage automatique du tunnel configuré: toutes les ${restartIntervalMinutes} minutes`);
+    // Initialize tunnel health checker for local port and tunnel verification
+    if (options.healthCheck !== false) {
+      // Convert seconds to milliseconds (CLI passes seconds, default to 30 seconds)
+      const healthCheckIntervalSeconds = parseInt(options.healthCheckInterval) || 30;
+      const healthCheckInterval = healthCheckIntervalSeconds * 1000;
+      
+      // Parse public address for health checks
+      // For HTTP: publicAddr is like "myapp.relais.dev:443" -> we need "myapp.relais.dev"
+      // For TCP: publicAddr is like "tcp.relais.dev:12345" -> we need host and port separately
+      const [publicHost, publicPort] = publicAddr.split(':');
+      const tunnelTypeLabel = options.type === 'tcp' ? 'TCP' : 'HTTP';
+      
+      tunnelHealthChecker = new TunnelHealthChecker({
+        localHost: options.host || 'localhost',
+        localPort: parseInt(options.port),
+        tunnelType: options.type || 'http',
+        publicUrl: publicHost,
+        publicPort: options.type === 'tcp' ? publicPort : null,
+        relayServer: currentServer.split(':')[0],
+        checkInterval: healthCheckInterval,
+      });
 
-    // Flag to indicate that the periodic restart timer has fired.
-    let restartTriggered = false;
+      tunnelHealthChecker.start({
+        onLocalPortDown: () => {
+          errorWithTimestamp(`🔴 Le service local sur le port ${options.port} ne répond plus`);
+        },
+        onLocalPortRestored: () => {
+          console.log(`✅ Le service local sur le port ${options.port} est de nouveau accessible`);
+        },
+        onTunnelDown: () => {
+          debug(`Tunnel ${tunnelTypeLabel} détecté comme non fonctionnel`);
+        },
+        onTunnelRestored: () => {
+          console.log(`✅ Le tunnel ${tunnelTypeLabel} fonctionne à nouveau`);
+        },
+        onReconnectNeeded: () => {
+          debug('TunnelHealthChecker a déclenché une demande de reconnexion');
+          tunnelHealthCheckTriggeredReconnect = true;
+          // Force la fermeture de la connexion de contrôle pour déclencher la reconnexion
+          if (ctrlConn) {
+            ctrlConn.destroy();
+          }
+        },
+      });
 
-    // Timer to restart the tunnel periodically
-    restartTimer = setTimeout(() => {
-      debug('Restart interval reached - restarting tunnel');
-      restartTriggered = true;
-
-      // Destroying the socket will eventually reject any pending decoder.decode()
-      // call, but if the timer fires in the short gap **between** two decode()
-      // invocations there might be no active error/end listener yet. Keeping this
-      // flag allows the main loop to notice the restart request immediately on
-      // the next iteration so we never miss a scheduled restart.
-      if (ctrlConn) {
-        ctrlConn.destroy();
-      }
-    }, RESTART_INTERVAL_MS);
+      debug(`Vérification de santé du tunnel ${tunnelTypeLabel} activée (intervalle: ${healthCheckIntervalSeconds}s)`);
+    }
 
     // Main loop to receive new connections
     while (true) {
@@ -347,13 +365,6 @@ export async function connectAndServe(options, failureTracker = null) {
         // Only log non-heartbeat messages to avoid spam
         if (msg.command !== 'HEARTBEAT') {
           debug('Message received:', msg);
-        }
-
-        // If the restart timer fired while we were waiting for a message, bail
-        // out right away so that the upper reconnect-loop can spin up a fresh
-        // tunnel without any back-off.
-        if (restartTriggered) {
-          throw new Error('Tunnel restart interval reached');
         }
 
         if (msg.command === 'NEWCONN') {
@@ -377,12 +388,6 @@ export async function connectAndServe(options, failureTracker = null) {
           debug('Unexpected message received:', msg);
         }
       } catch (err) {
-        // If we already know that a periodic restart was requested, propagate a
-        // dedicated error so that the outer loop can react without delay.
-        if (restartTriggered) {
-          throw new Error('Tunnel restart interval reached');
-        }
-
         // If the connection is closed by the server, this is where we track it
         if (err.message === 'Connection closed by server') {
           // Don't record failure here - let the caller handle it
@@ -394,6 +399,11 @@ export async function connectAndServe(options, failureTracker = null) {
     }
   } catch (err) {
     debug('Error in connectAndServe:', err);
+    
+    // Check if the error was caused by tunnel health checker
+    if (tunnelHealthCheckTriggeredReconnect) {
+      throw new Error('Tunnel health check triggered reconnection');
+    }
     
     // Check if the error was caused by health monitor
     if (isHealthMonitorConnLost) {
@@ -408,15 +418,16 @@ export async function connectAndServe(options, failureTracker = null) {
     
     throw err;
   } finally {
+    // Stop tunnel health checker
+    if (tunnelHealthChecker && typeof tunnelHealthChecker.stop === 'function') {
+      tunnelHealthChecker.stop();
+      debug('Tunnel health checker stopped');
+    }
+
     // Stop health monitoring
     if (healthMonitor && typeof healthMonitor.stop === 'function') {
       healthMonitor.stop();
       debug('Health monitor stopped');
-    }
-
-    // Clear periodic restart timer
-    if (typeof restartTimer !== 'undefined') {
-      clearTimeout(restartTimer);
     }
 
     if (ctrlConn) {
@@ -469,12 +480,13 @@ export async function runTunnel(options) {
         continue;
       }
 
-      // Handle periodic restart without backoff
-        if (err.message.includes('Tunnel restart interval reached')) {
-          debug('Redémarrage périodique du tunnel');
-          failureTracker.reset();
-          continue;
-        }
+      // Handle tunnel health check triggered reconnection
+      if (err.message.includes('Tunnel health check triggered reconnection')) {
+        errorWithTimestamp('🔄 Reconnexion du tunnel déclenchée par la vérification de santé...');
+        // Immediate retry without backoff
+        failureTracker.reset();
+        continue;
+      }
       
       // Determine error type and handle accordingly
       if (err.message.includes('Connection closed by server')) {

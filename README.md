@@ -1,26 +1,19 @@
-# Relais Node.js Client v1.4.2
+# Relais Node.js Client v1.6.0
 
-A Node.js client for the relay tunnel service, allowing you to expose local services to the Internet with persistent agent mode for maximum network resilience.
+A Node.js client for the relay tunnel service, allowing you to expose local services to the Internet with persistent agent mode and automatic health monitoring for maximum network resilience.
 
-## 🆕 What's New in v1.4.2
+## 🆕 What's New in v1.6.0
+
+- 🩺 **Automatic Tunnel Health Checking**: Continuously monitors tunnel health and automatically repairs broken connections
+- 🔄 **Smart Auto-Reconnection**: Detects when tunnel is down but relay server is accessible, triggers immediate reconnection
+- ⏳ **Waiting for Recovery Mode**: When relay server is unreachable, monitors continuously and reconnects as soon as it comes back
+- 🚫 **Removed `--restart-interval`**: No longer needed - health checker handles reconnection automatically
+- ⚙️ **New CLI Options**: `--health-check`, `--no-health-check`, `--health-check-interval`
+
+## Previous (v1.4.2)
 
 - 📦 **Larger uploads**: Max archive size increased to 100MB
 - ✨ Terminal animations and server simplification from v1.4.0 retained
-
-## Previous (v1.4.0)
-
-- ✨ **Terminal animations**: Clear visual feedback with animated steps for connecting, establishing tunnels, uploads, and status monitoring (uses `chalk`)
-- 🌐 **Server address simplified**: Always uses `tcp.relais.dev:1080` (failover and old IP/ports removed)
-- 📝 **Docs & CLI**: Updated defaults and messages to reflect the new server and animations
-
-## Previous (v1.3.4)
-
-- 🎯 **Configurable Restart Interval**: Customize tunnel restart timing (1-1440 minutes)
-- ⚡ **Optimized TCP Connections**: Enhanced socket performance with aggressive TCP optimizations
-- 🚀 **Faster Health Monitoring**: Reduced health check interval to 3 seconds with adaptive checking
-- 🔧 **Connection Pooling**: Reuse connections for better performance
-- 🌐 **DNS Retry Logic**: Exponential backoff for DNS resolution failures
-- 📊 **Improved Buffer Management**: Larger send/receive buffers (256KB) for better throughput
 
 ## Previous Features (v1.2.0)
 
@@ -120,7 +113,9 @@ Available options:
 - `-r, --remote <port>` : Desired remote port
 - `-t, --type <type>` : Protocol type (http or tcp) (default: http)
 - `--timeout <seconds>` : Tunnel establishment timeout in seconds (default: 30)
-- `--restart-interval <minutes>` : Tunnel restart interval in minutes (default: 30, range: 1-1440)
+- `--health-check` : Enable automatic tunnel health checking (default: enabled)
+- `--no-health-check` : Disable automatic tunnel health checking
+- `--health-check-interval <seconds>` : Health check interval in seconds (default: 30)
 - `-v, --verbose` : Enable detailed logging
 
 ## Examples
@@ -138,22 +133,32 @@ relais tunnel -p 3000 -k mytoken
 # With custom timeout (60 seconds instead of default 30)
 relais tunnel -p 3000 --timeout 60
 
-# With custom restart interval (60 minutes instead of default 30)
-relais tunnel -p 3000 --restart-interval 60
+# Disable automatic health checking
+relais tunnel -p 3000 --no-health-check
+
+# Custom health check interval (60 seconds instead of default 30)
+relais tunnel -p 3000 --health-check-interval 60
 
 # With all parameters and verbose logging
-relais tunnel -s tcp.relais.dev:1080 -h localhost -p 3000 -k mytoken -d mysite.example.com -r 8080 -t http --timeout 60 --restart-interval 120 -v
+relais tunnel -s tcp.relais.dev:1080 -h localhost -p 3000 -k mytoken -d mysite.example.com -r 8080 -t http --timeout 60 --health-check-interval 60 -v
 ```
 
-## 🔧 Technical Improvements
+## Technical Improvements
+
+### Automatic Health Monitoring
+- **Tunnel Health Checker**: Periodically verifies tunnel is working by testing local port and public URL
+- **Local Port Verification**: TCP connection test to ensure local service is accessible
+- **Public URL Testing**: HTTP/TCP requests to public tunnel URL to verify end-to-end connectivity
+- **Relay Server Monitoring**: Checks if relay server is reachable before attempting reconnection
+- **Auto-Repair**: Automatically triggers reconnection when tunnel fails but relay is accessible
+- **Waiting for Recovery**: Monitors continuously when relay is down, reconnects when it comes back
 
 ### Agent Mode & Connection Management
 - **Persistent Agent**: Never stops trying to connect for network errors (EHOSTUNREACH, ETIMEDOUT, etc.)
 - **Smart Error Classification**: Distinguishes network errors from server/authentication issues
-- **Exponential Backoff**: 1s → 2s → 4s → 8s → 16s → 30s max delay between attempts
+- **Exponential Backoff**: 1s -> 2s -> 4s -> 8s -> 16s -> 30s max delay between attempts
 - **TCP Keep-Alive**: 30s for faster dead connection detection
 - **Heartbeat Monitoring**: 30s interval for connection health
-- **Configurable Restart**: Customizable tunnel restart interval (1-1440 minutes)
 
 ### Network Resilience
 - **Infinite Retry**: Continues attempting connection when network is down

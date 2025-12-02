@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.6.0] - 2025-12-02
+
+### Added
+- 🩺 **Automatic Tunnel Health Checking**: New `TunnelHealthChecker` class that continuously monitors tunnel health
+  - Verifies local port accessibility via TCP connection test
+  - For HTTP tunnels: performs HTTP request to public URL
+  - For TCP tunnels: performs TCP connection to public address/port
+  - Checks relay server availability before attempting reconnection
+- ⏳ **Waiting for Recovery Mode**: When relay server is unreachable, the client monitors continuously and reconnects automatically when the relay comes back online
+- ⚙️ **New CLI Options**:
+  - `--health-check` - Enable automatic health checking (default: enabled)
+  - `--no-health-check` - Disable automatic health checking
+  - `--health-check-interval <seconds>` - Configure check interval (default: 30 seconds)
+
+### Removed
+- 🗑️ **`--restart-interval` option**: No longer needed - the health checker now handles automatic reconnection when issues are detected
+
+### Changed
+- 🔄 **Smart Auto-Reconnection**: Tunnel automatically repairs itself when health check detects failure but relay server is accessible
+- 📦 Package description updated to reflect automatic health monitoring
+
+---
+
 ## [1.4.3] - 2025-09-05
 
 ### Deprecated
