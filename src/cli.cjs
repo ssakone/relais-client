@@ -27,6 +27,9 @@ program
   .description('Node.js client for the relay tunnel service')
   .version('1.5.1');
 
+// Libère le raccourci -h pour l'option --host et déplace l'aide sur -H
+program.helpOption('-H, --help', 'Display help for command');
+
 program
   .command('set-token <token>')
   .description('Save an authentication token for future use')

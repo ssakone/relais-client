@@ -113,7 +113,11 @@ function startHeartbeatMonitoring(socket, lastHeartbeatReceived) {
 
 export async function connectAndServe(options, failureTracker = null) {
   debug('Starting tunnel service');
-  
+
+  // Normalize local host value early so it can be reused consistently
+  const localHost = options.host || 'localhost';
+  options.host = localHost;
+
   // Validate and use user-defined timeout or default to 30 seconds
   let timeoutSeconds = parseInt(options.timeout);
   if (isNaN(timeoutSeconds) || timeoutSeconds < 1 || timeoutSeconds > 300) {
@@ -321,9 +325,9 @@ export async function connectAndServe(options, failureTracker = null) {
       // For TCP: publicAddr is like "tcp.relais.dev:12345" -> we need host and port separately
       const [publicHost, publicPort] = publicAddr.split(':');
       const tunnelTypeLabel = options.type === 'tcp' ? 'TCP' : 'HTTP';
-      
+
       tunnelHealthChecker = new TunnelHealthChecker({
-        localHost: options.host || 'localhost',
+        localHost,
         localPort: parseInt(options.port),
         tunnelType: options.type || 'http',
         publicUrl: publicHost,
