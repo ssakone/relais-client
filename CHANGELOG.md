@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.6.2] - 2025-12-10
+
+### Fixed
+- **DNS Retry Crash Fix**: Fixed `TypeError: Assignment to constant variable` crash that occurred during DNS resolution retries
+  - The `ctrlConn` socket variable was incorrectly declared as `const` preventing reassignment during retry attempts
+  - Changed to `let` to allow proper socket recreation on DNS failures
+
+---
+
 ## [1.6.1] - 2025-12-10
 
 ### Security

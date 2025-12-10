@@ -139,7 +139,7 @@ export async function connectAndServe(options, failureTracker = null) {
   
   const establishmentPromise = (async () => {
     // Connect to relay server (control channel)
-    const ctrlConn = new Socket();
+    let ctrlConn = new Socket();
     const [connHost, connPort] = currentServer.split(':');
 
     try {
