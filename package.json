@@ -1,6 +1,6 @@
 {
   "name": "relais",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "description": "Node.js client for the relay tunnel service - Agent mode with persistent reconnection and automatic health monitoring",
   "main": "src/cli.cjs",
   "type": "module",
@@ -8,13 +8,7 @@
     "relais": "src/cli.cjs"
   },
   "scripts": {
-    "start": "node src/cli.cjs",
-    "build": "npm run build:all",
-    "build:all": "npm run build:win && npm run build:linux && npm run build:macos",
-    "build:win": "pkg src/cli.cjs --target node18-win-x64 --output dist/relais-win.exe",
-    "build:linux": "pkg src/cli.cjs --target node18-linux-x64 --output dist/relais-linux",
-    "build:macos": "pkg src/cli.cjs --target node18-macos-x64 --output dist/relais-macos",
-    "build:win-only": "pkg src/cli.cjs --target node18-win-x64 --output dist/relais-win.exe"
+    "start": "node src/cli.cjs"
   },
   "keywords": [
     "tunnel",
@@ -42,23 +36,6 @@
     "chalk": "^5.3.0"
   },
   "devDependencies": {
-    "esbuild": "^0.25.5",
-    "pkg": "^5.8.1"
-  },
-  "pkg": {
-    "targets": [
-      "node18-win-x64",
-      "node18-linux-x64", 
-      "node18-macos-x64"
-    ],
-    "outputPath": "dist",
-    "assets": [
-      "src/**/*.js",
-      "src/**/*.cjs"
-    ],
-    "scripts": [
-      "src/**/*.js",
-      "src/**/*.cjs"
-    ]
+    "esbuild": "^0.25.5"
   }
 }

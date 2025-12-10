@@ -1,11 +1,12 @@
 import { Socket } from 'net';
-import { TunnelRequest } from '../models/messages.js';
+import { TunnelRequest, SecureHandshakeInit } from '../models/messages.js';
 import { setKeepAlive, setNoDelay, handleNewConnection, optimizeSocket } from '../network/connection.js';
 import { debug, errorWithTimestamp } from '../utils/debug.js';
 import { ConnectionFailureTracker } from '../utils/failure-tracker.js';
 import { HealthMonitor } from '../utils/health-monitor.js';
 import { TunnelHealthChecker } from '../utils/tunnel-health-checker.js';
 import { createSpinner } from '../utils/terminal-spinner.js';
+import { SecureChannel, SecureJSONDecoder, SecureJSONEncoder } from '../crypto/secure-channel.js';
 
 // Utility function to read a complete JSON message from socket
 function createJSONDecoder(socket) {
@@ -214,7 +215,45 @@ export async function connectAndServe(options, failureTracker = null) {
         attemptConnection();
       });
 
-      // Send tunnel request in JSON
+      // Initialize secure channel (enabled by default, disabled with --insecure)
+      let secureChannel = null;
+      let secureEncoder = null;
+      let decoder = null;
+
+      if (!options.insecure) {
+        debug('Secure mode enabled - initiating key exchange');
+
+        // Create secure channel and generate keypair
+        secureChannel = new SecureChannel();
+
+        // Send secure handshake init
+        const handshakeInit = new SecureHandshakeInit(secureChannel.getPublicKey());
+        debug('Sending SECURE_INIT with public key');
+        ctrlConn.write(JSON.stringify(handshakeInit) + '\n');
+
+        // Wait for server's handshake response (use plaintext decoder for handshake)
+        const handshakeDecoder = createJSONDecoder(ctrlConn);
+        const handshakeResponse = await handshakeDecoder.decode();
+        debug('Received handshake response:', handshakeResponse);
+
+        if (handshakeResponse.command !== 'SECURE_ACK' || handshakeResponse.status !== 'OK') {
+          throw new Error(`Secure handshake failed: ${handshakeResponse.error || 'Unknown error'}`);
+        }
+
+        // Derive shared secret from server's public key
+        secureChannel.deriveSharedSecret(handshakeResponse.server_public_key);
+        debug('Shared secret derived successfully');
+
+        // Create secure encoder and decoder
+        secureEncoder = new SecureJSONEncoder(ctrlConn, secureChannel);
+        decoder = new SecureJSONDecoder(ctrlConn, secureChannel);
+      } else {
+        // Create plaintext JSON decoder for control connection
+        debug('Insecure mode - encryption disabled');
+        decoder = createJSONDecoder(ctrlConn);
+      }
+
+      // Send tunnel request (encrypted if secure mode)
       const request = new TunnelRequest(
         'TUNNEL',
         options.port.toString(),
@@ -227,10 +266,14 @@ export async function connectAndServe(options, failureTracker = null) {
       debug('Sending tunnel request:', JSON.stringify(request));
       const establishSpinner = createSpinner('Establishing tunnel').start();
       const requestSentTime = Date.now();
-      ctrlConn.write(JSON.stringify(request) + '\n');
 
-      // Create JSON decoder for control connection
-      const decoder = createJSONDecoder(ctrlConn);
+      if (secureEncoder) {
+        // Send encrypted tunnel request
+        secureEncoder.send(request);
+      } else {
+        // Send plaintext tunnel request
+        ctrlConn.write(JSON.stringify(request) + '\n');
+      }
 
       // Wait for initial response
       debug('Waiting for server response...');
@@ -247,8 +290,8 @@ export async function connectAndServe(options, failureTracker = null) {
         throw new Error(`Server error: ${response.error}`);
       }
       establishSpinner.succeed('Tunnel established');
-      
-      return { ctrlConn, decoder, response };
+
+      return { ctrlConn, decoder, response, secureChannel };
     } catch (err) {
       try { createSpinner().fail('Connection failed'); } catch {}
       if (ctrlConn) {
@@ -265,17 +308,18 @@ export async function connectAndServe(options, failureTracker = null) {
     }, TUNNEL_ESTABLISHMENT_TIMEOUT);
   });
 
-  let ctrlConn, decoder, response;
+  let ctrlConn, decoder, response, secureChannel;
   let healthMonitor = null;
   let isHealthMonitorConnLost = false;
   let tunnelHealthChecker = null;
   let tunnelHealthCheckTriggeredReconnect = false;
-  
+
   try {
     const result = await Promise.race([establishmentPromise, timeoutPromise]);
     ctrlConn = result.ctrlConn;
     decoder = result.decoder;
     response = result.response;
+    secureChannel = result.secureChannel;
 
     // Display tunnel URL (keep user-facing)
     const publicAddr = response.public_addr;

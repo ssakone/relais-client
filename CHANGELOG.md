@@ -1,5 +1,30 @@
 # Changelog
 
+## [1.6.1] - 2025-12-10
+
+### Security
+- **End-to-End Encryption by Default**: All tunnel communications are now encrypted using ECDH P-256 key exchange + AES-256-GCM
+  - Tokens and sensitive data are never transmitted in plaintext
+  - Forward secrecy with ephemeral keys per connection
+  - Authenticated encryption prevents tampering
+- **Vulnerability Fixes**:
+  - Fixed `glob` CVE-2025-64756 (command injection)
+  - Fixed `tar-fs` GHSA-vj76-c3g6-qr5v (symlink bypass)
+  - Removed deprecated `pkg` package (GHSA-22r3-9w55-cj54)
+
+### Added
+- `--insecure` flag to disable encryption (not recommended)
+
+### Removed
+- Standalone executable builds (`pkg`) - use `npm install -g relais` instead
+- `--secure` flag (encryption is now enabled by default)
+
+### Changed
+- Reduced dependencies from 204 to 97 packages
+- Silent secure handshake (no user-facing messages, debug only)
+
+---
+
 ## [1.6.0] - 2025-12-02
 
 ### Added

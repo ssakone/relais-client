@@ -25,7 +25,7 @@ const program = new Command();
 program
   .name('relais')
   .description('Node.js client for the relay tunnel service')
-  .version('1.5.1');
+  .version('1.6.1');
 
 // Libère le raccourci -h pour l'option --host et déplace l'aide sur -H
 program.helpOption('-H, --help', 'Display help for command');
@@ -160,6 +160,7 @@ program
   .option('--health-check', 'Enable tunnel health checking (default: enabled)', true)
   .option('--no-health-check', 'Disable tunnel health checking')
   .option('--health-check-interval <seconds>', 'Health check interval in seconds', '30')
+  .option('--insecure', 'Disable encrypted tunnel mode (not recommended)')
   .option('-v, --verbose', 'Enable detailed logging')
   .action(async (options) => {
     if (options.verbose) {

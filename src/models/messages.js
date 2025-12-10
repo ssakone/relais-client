@@ -31,3 +31,21 @@ export class HeartbeatMsg {
     this.command = "HEARTBEAT";
   }
 }
+
+export class SecureHandshakeInit {
+  constructor(clientPublicKey) {
+    this.command = "SECURE_INIT";
+    this.version = 1;
+    this.client_public_key = clientPublicKey;
+  }
+}
+
+export class SecureHandshakeResponse {
+  constructor(serverPublicKey, status, error) {
+    this.command = "SECURE_ACK";
+    this.version = 1;
+    this.server_public_key = serverPublicKey;
+    this.status = status;
+    this.error = error || "";
+  }
+}
