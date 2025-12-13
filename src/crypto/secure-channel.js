@@ -110,6 +110,7 @@ export class SecureChannel {
 
 /**
  * SecureJSONEncoder wraps a socket to send encrypted JSON messages
+ * Uses binary encoding (base64) to bypass DPI on mobile networks
  */
 export class SecureJSONEncoder {
   constructor(socket, secureChannel) {
@@ -118,18 +119,34 @@ export class SecureJSONEncoder {
   }
 
   /**
-   * Send an encrypted JSON message
+   * Send an encrypted JSON message using binary protocol (base64 encoded for DPI bypass)
+   * Format: [0x00 magic][4-byte length BE][base64(encrypted data)]
    * @param {Object} message - The message object to encrypt and send
    */
   send(message) {
     const jsonStr = JSON.stringify(message);
-    const encrypted = this.secureChannel.encrypt(jsonStr);
-    this.socket.write(encrypted);
+    // encrypt() returns [4-byte length][12-byte nonce][ciphertext]
+    // We need just the encrypted part (nonce + ciphertext) for base64 encoding
+    const fullEncrypted = this.secureChannel.encrypt(jsonStr);
+    // Skip the 4-byte length prefix, we'll add our own binary protocol header
+    const encryptedData = fullEncrypted.slice(4);
+
+    // Base64 encode the encrypted data
+    const b64Data = encryptedData.toString('base64');
+
+    // Build binary protocol message: [0x00][4-byte length][base64]
+    const msg = Buffer.alloc(1 + 4 + b64Data.length);
+    msg[0] = BINARY_PROTOCOL_MAGIC;
+    msg.writeUInt32BE(b64Data.length, 1);
+    msg.write(b64Data, 5);
+
+    this.socket.write(msg);
   }
 }
 
 /**
  * SecureJSONDecoder wraps a socket to receive encrypted JSON messages
+ * Uses binary protocol (base64) to bypass DPI on mobile networks
  */
 export class SecureJSONDecoder {
   constructor(socket, secureChannel, initialBuffer = null) {
@@ -140,34 +157,44 @@ export class SecureJSONDecoder {
 
   /**
    * Read and decrypt the next JSON message
+   * Binary protocol format: [0x00 magic][4-byte length BE][base64(encrypted data)]
    * @returns {Promise<Object>} The decrypted message object
    */
   decode() {
     return new Promise((resolve, reject) => {
       const tryParse = () => {
-        // Need at least 4 bytes for length
-        if (this.buffer.length < 4) {
+        // Binary protocol: [0x00][4-byte length][base64]
+        // Need at least 5 bytes for magic + length
+        if (this.buffer.length < 5) {
           return false;
         }
 
-        const msgLen = this.buffer.readUInt32BE(0);
+        // Verify magic byte
+        if (this.buffer[0] !== BINARY_PROTOCOL_MAGIC) {
+          reject(new Error('Invalid magic byte in binary message'));
+          return true;
+        }
 
-        // Sanity check on message length
-        if (msgLen > 1024 * 1024) {
+        const b64Len = this.buffer.readUInt32BE(1);
+
+        // Sanity check on message length (~1.4MB base64 decodes to ~1MB)
+        if (b64Len > 1400 * 1024) {
           reject(new Error('Message too large'));
           return true;
         }
 
         // Check if we have the complete message
-        if (this.buffer.length < 4 + msgLen) {
+        if (this.buffer.length < 5 + b64Len) {
           return false;
         }
 
-        // Extract encrypted data (without length prefix)
-        const encryptedData = this.buffer.slice(4, 4 + msgLen);
-        this.buffer = this.buffer.slice(4 + msgLen);
+        // Extract base64 data
+        const b64Data = this.buffer.slice(5, 5 + b64Len).toString();
+        this.buffer = this.buffer.slice(5 + b64Len);
 
         try {
+          // Decode base64 to get encrypted data (nonce + ciphertext)
+          const encryptedData = Buffer.from(b64Data, 'base64');
           const plaintext = this.secureChannel.decrypt(encryptedData);
           const message = JSON.parse(plaintext);
           resolve(message);
