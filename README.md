@@ -1,16 +1,24 @@
-# Relais Node.js Client v1.6.1
+# Relais Node.js Client v1.6.3
 
 A Node.js client for the relay tunnel service, allowing you to expose local services to the Internet with end-to-end encryption, persistent agent mode and automatic health monitoring.
 
-## What's New in v1.6.1
+## What's New in v1.6.3
 
-- **End-to-End Encryption by Default**: All communications are now encrypted using ECDH P-256 + AES-256-GCM
-- **Zero Configuration Security**: Tokens and data are protected without any setup required
-- **Security Fixes**: Resolved vulnerabilities in glob, tar-fs, and removed deprecated pkg
-- **Lighter Package**: Reduced from 204 to 97 dependencies
+- **Mobile Network Compatibility**: Fixed connection issues on restrictive mobile networks (DPI bypass)
+- **Binary Handshake Protocol**: Handshake now uses binary encoding to work on all networks
+- **Backward Compatible**: Servers support both new binary and legacy JSON clients
 
-## Previous (v1.6.0)
+## Previous Versions
 
+### v1.6.2
+- DNS retry crash fix
+
+### v1.6.1
+- End-to-End Encryption by Default (ECDH P-256 + AES-256-GCM)
+- Security vulnerability fixes
+- Reduced dependencies (204 -> 97 packages)
+
+### v1.6.0
 - Automatic Tunnel Health Checking
 - Smart Auto-Reconnection
 - Waiting for Recovery Mode

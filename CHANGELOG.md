@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.6.3] - 2025-12-13
+
+### Fixed
+- **Mobile Network Compatibility**: Fixed handshake failures on restrictive mobile networks (tested in Mali)
+  - DPI (Deep Packet Inspection) proxies were blocking JSON-formatted handshake messages
+  - Handshake now uses binary protocol (base64-encoded) to bypass DPI inspection
+  - Connection establishment is now reliable on mobile data networks worldwide
+
+### Changed
+- **Binary Handshake Protocol**: SECURE_INIT and SECURE_ACK messages are now encoded in binary format
+  - Format: `[0x00 magic byte][4-byte length][base64(JSON)]`
+  - Server auto-detects and responds in matching format
+  - Full backward compatibility with older JSON-only clients
+
+### Technical
+- Added `encodeBinaryHandshake()` and `BinaryHandshakeDecoder` in `secure-channel.js`
+- Server-side hybrid protocol detection in `tunnel.go`
+- Only handshake is affected; post-handshake AES-GCM encryption remains unchanged
+
+---
+
 ## [1.6.2] - 2025-12-10
 
 ### Fixed

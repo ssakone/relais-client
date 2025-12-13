@@ -218,3 +218,158 @@ export class SecureJSONDecoder {
     });
   }
 }
+
+/**
+ * Binary protocol magic byte - identifies binary-encoded handshake messages
+ */
+export const BINARY_PROTOCOL_MAGIC = 0x00;
+
+/**
+ * Encode a JSON object as a binary handshake message
+ * Format: [1 byte: 0x00][4 bytes: length BE][base64(JSON)]
+ * @param {Object} jsonObj - The JSON object to encode
+ * @returns {Buffer} The binary-encoded message
+ */
+export function encodeBinaryHandshake(jsonObj) {
+  const jsonStr = JSON.stringify(jsonObj);
+  const base64 = Buffer.from(jsonStr).toString('base64');
+
+  // Build message: [0x00][4 bytes len][base64]
+  const msg = Buffer.alloc(1 + 4 + base64.length);
+  msg[0] = BINARY_PROTOCOL_MAGIC;
+  msg.writeUInt32BE(base64.length, 1);
+  msg.write(base64, 5);
+
+  return msg;
+}
+
+/**
+ * Decode a binary handshake message to JSON
+ * Reads from a buffer that starts with the magic byte
+ * @param {Buffer} buffer - The buffer containing the binary message
+ * @returns {{message: Object, bytesConsumed: number}} The decoded message and bytes consumed
+ */
+export function decodeBinaryHandshake(buffer) {
+  if (buffer.length < 5) {
+    throw new Error('Buffer too short for binary handshake');
+  }
+
+  if (buffer[0] !== BINARY_PROTOCOL_MAGIC) {
+    throw new Error('Invalid magic byte for binary handshake');
+  }
+
+  const length = buffer.readUInt32BE(1);
+
+  if (length > 64 * 1024) {
+    throw new Error('Handshake message too large');
+  }
+
+  if (buffer.length < 5 + length) {
+    throw new Error('Incomplete binary handshake message');
+  }
+
+  const base64Payload = buffer.slice(5, 5 + length).toString();
+  const jsonStr = Buffer.from(base64Payload, 'base64').toString('utf8');
+  const message = JSON.parse(jsonStr);
+
+  return {
+    message,
+    bytesConsumed: 5 + length
+  };
+}
+
+/**
+ * BinaryHandshakeDecoder reads binary handshake messages from a socket
+ */
+export class BinaryHandshakeDecoder {
+  constructor(socket) {
+    this.socket = socket;
+    this.buffer = Buffer.alloc(0);
+  }
+
+  /**
+   * Read and decode the next binary handshake message
+   * @returns {Promise<Object>} The decoded JSON message
+   */
+  decode() {
+    return new Promise((resolve, reject) => {
+      const tryParse = () => {
+        // Need at least 5 bytes for magic + length
+        if (this.buffer.length < 5) {
+          return false;
+        }
+
+        // Verify magic byte
+        if (this.buffer[0] !== BINARY_PROTOCOL_MAGIC) {
+          reject(new Error('Invalid magic byte in binary handshake'));
+          return true;
+        }
+
+        const length = this.buffer.readUInt32BE(1);
+
+        // Sanity check
+        if (length > 64 * 1024) {
+          reject(new Error('Handshake message too large'));
+          return true;
+        }
+
+        // Check if we have the complete message
+        if (this.buffer.length < 5 + length) {
+          return false;
+        }
+
+        // Extract and decode
+        const base64Payload = this.buffer.slice(5, 5 + length).toString();
+        this.buffer = this.buffer.slice(5 + length);
+
+        try {
+          const jsonStr = Buffer.from(base64Payload, 'base64').toString('utf8');
+          const message = JSON.parse(jsonStr);
+          resolve(message);
+        } catch (err) {
+          reject(new Error('Error decoding binary handshake: ' + err.message));
+        }
+        return true;
+      };
+
+      // Try to parse from existing buffer
+      if (tryParse()) {
+        return;
+      }
+
+      const onData = (data) => {
+        this.buffer = Buffer.concat([this.buffer, data]);
+        if (tryParse()) {
+          cleanup();
+        }
+      };
+
+      const onError = (err) => {
+        cleanup();
+        reject(err);
+      };
+
+      const onEnd = () => {
+        cleanup();
+        reject(new Error('Connection closed by server'));
+      };
+
+      const onClose = () => {
+        cleanup();
+        reject(new Error('Connection closed by server'));
+      };
+
+      const cleanup = () => {
+        this.socket.removeListener('data', onData);
+        this.socket.removeListener('error', onError);
+        this.socket.removeListener('end', onEnd);
+        this.socket.removeListener('close', onClose);
+      };
+
+      this.socket.on('data', onData);
+      this.socket.on('error', onError);
+      this.socket.on('end', onEnd);
+      this.socket.on('close', onClose);
+    });
+  }
+}

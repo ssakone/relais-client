@@ -6,7 +6,7 @@ import { ConnectionFailureTracker } from '../utils/failure-tracker.js';
 import { HealthMonitor } from '../utils/health-monitor.js';
 import { TunnelHealthChecker } from '../utils/tunnel-health-checker.js';
 import { createSpinner } from '../utils/terminal-spinner.js';
-import { SecureChannel, SecureJSONDecoder, SecureJSONEncoder } from '../crypto/secure-channel.js';
+import { SecureChannel, SecureJSONDecoder, SecureJSONEncoder, encodeBinaryHandshake, BinaryHandshakeDecoder } from '../crypto/secure-channel.js';
 
 // Utility function to read a complete JSON message from socket
 function createJSONDecoder(socket) {
@@ -226,13 +226,15 @@ export async function connectAndServe(options, failureTracker = null) {
         // Create secure channel and generate keypair
         secureChannel = new SecureChannel();
 
-        // Send secure handshake init
+        // Send secure handshake init using binary protocol
+        // Binary format is used to bypass DPI proxies that block JSON on mobile networks
         const handshakeInit = new SecureHandshakeInit(secureChannel.getPublicKey());
-        debug('Sending SECURE_INIT with public key');
-        ctrlConn.write(JSON.stringify(handshakeInit) + '\n');
+        debug('Sending SECURE_INIT with public key (binary protocol)');
+        const binaryHandshake = encodeBinaryHandshake(handshakeInit);
+        ctrlConn.write(binaryHandshake);
 
-        // Wait for server's handshake response (use plaintext decoder for handshake)
-        const handshakeDecoder = createJSONDecoder(ctrlConn);
+        // Wait for server's handshake response (binary format)
+        const handshakeDecoder = new BinaryHandshakeDecoder(ctrlConn);
         const handshakeResponse = await handshakeDecoder.decode();
         debug('Received handshake response:', handshakeResponse);
 
