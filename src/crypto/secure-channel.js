@@ -132,10 +132,10 @@ export class SecureJSONEncoder {
  * SecureJSONDecoder wraps a socket to receive encrypted JSON messages
  */
 export class SecureJSONDecoder {
-  constructor(socket, secureChannel) {
+  constructor(socket, secureChannel, initialBuffer = null) {
     this.socket = socket;
     this.secureChannel = secureChannel;
-    this.buffer = Buffer.alloc(0);
+    this.buffer = initialBuffer && initialBuffer.length > 0 ? initialBuffer : Buffer.alloc(0);
   }
 
   /**
@@ -285,6 +285,14 @@ export class BinaryHandshakeDecoder {
   constructor(socket) {
     this.socket = socket;
     this.buffer = Buffer.alloc(0);
+  }
+
+  /**
+   * Get remaining buffer data (for passing to next decoder)
+   * @returns {Buffer} The remaining unprocessed data
+   */
+  getRemainingBuffer() {
+    return this.buffer;
   }
 
   /**

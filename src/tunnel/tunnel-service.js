@@ -246,9 +246,15 @@ export async function connectAndServe(options, failureTracker = null) {
         secureChannel.deriveSharedSecret(handshakeResponse.server_public_key);
         debug('Shared secret derived successfully');
 
-        // Create secure encoder and decoder
+        // Get any remaining buffer from handshake decoder (in case server sent more data)
+        const remainingBuffer = handshakeDecoder.getRemainingBuffer();
+        if (remainingBuffer.length > 0) {
+          debug(`Passing ${remainingBuffer.length} bytes from handshake decoder to secure decoder`);
+        }
+
+        // Create secure encoder and decoder, passing remaining buffer
         secureEncoder = new SecureJSONEncoder(ctrlConn, secureChannel);
-        decoder = new SecureJSONDecoder(ctrlConn, secureChannel);
+        decoder = new SecureJSONDecoder(ctrlConn, secureChannel, remainingBuffer);
       } else {
         // Create plaintext JSON decoder for control connection
         debug('Insecure mode - encryption disabled');
