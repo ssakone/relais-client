@@ -66,7 +66,7 @@ const program = new Command();
 program
   .name('relais')
   .description('Node.js client for the relay tunnel service')
-  .version('1.6.31');
+  .version('1.6.4');
 
 // Libère le raccourci -h pour l'option --host et déplace l'aide sur -H
 program.helpOption('-H, --help', 'Display help for command');
