@@ -158,6 +158,33 @@ export async function connectAndServe(options, failureTracker = null) {
         // Add exponential backoff for DNS resolution
         let dnsRetries = 0;
         const maxDnsRetries = 3;
+        let isResolved = false;
+        
+        // Attach error handler to current socket - must be called each time we create a new socket
+        const attachErrorHandler = () => {
+          ctrlConn.on('error', (err) => {
+            if (isResolved) return; // Ignore errors after resolution
+            
+            if (err.code === 'ENOTFOUND' && dnsRetries < maxDnsRetries) {
+              dnsRetries++;
+              debug(`DNS resolution failed, retry ${dnsRetries}/${maxDnsRetries}`);
+              setTimeout(() => {
+                try {
+                  ctrlConn.destroy();
+                } catch (e) {
+                  // Ignore destroy errors
+                }
+                ctrlConn = new Socket();
+                attachErrorHandler(); // Re-attach error handler to new socket
+                attemptConnection();
+              }, Math.pow(2, dnsRetries) * 1000); // Exponential backoff: 2s, 4s, 8s
+            } else {
+              clearTimeout(connectTimeout);
+              debug(`Connection error after ${Date.now() - connectionStartTime}ms:`, err.message);
+              reject(err);
+            }
+          });
+        };
         
         const attemptConnection = () => {
           // Enable TCP optimizations before connection
@@ -178,6 +205,7 @@ export async function connectAndServe(options, failureTracker = null) {
             },
            
             () => {
+              isResolved = true;
               clearTimeout(connectTimeout);
               const connectionTime = Date.now() - connectionStartTime;
               debug(`Connected to relay server: ${currentServer} (took ${connectionTime}ms)`);
@@ -196,22 +224,7 @@ export async function connectAndServe(options, failureTracker = null) {
           );
         };
         
-        ctrlConn.on('error', (err) => {
-          if (err.code === 'ENOTFOUND' && dnsRetries < maxDnsRetries) {
-            dnsRetries++;
-            debug(`DNS resolution failed, retry ${dnsRetries}/${maxDnsRetries}`);
-            setTimeout(() => {
-              ctrlConn.destroy();
-              ctrlConn = new Socket();
-              attemptConnection();
-            }, Math.pow(2, dnsRetries) * 1000); // Exponential backoff: 2s, 4s, 8s
-          } else {
-            clearTimeout(connectTimeout);
-            debug(`Connection error after ${Date.now() - connectionStartTime}ms:`, err.message);
-            reject(err);
-          }
-        });
-        
+        attachErrorHandler();
         attemptConnection();
       });
 

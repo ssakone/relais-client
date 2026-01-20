@@ -20,6 +20,47 @@ let errorWithTimestamp = (...args) => {
   console.error(`[${timestamp}]`, ...args);
 };
 
+// Global error handlers to prevent crashes from unhandled errors
+process.on('uncaughtException', (err) => {
+  // Only log network-related errors at debug level, don't crash
+  const isNetworkError = err.code === 'ENOTFOUND' || 
+                         err.code === 'ECONNREFUSED' || 
+                         err.code === 'ETIMEDOUT' ||
+                         err.code === 'EHOSTUNREACH' ||
+                         err.code === 'ENETUNREACH' ||
+                         err.code === 'ECONNRESET' ||
+                         err.code === 'EPIPE';
+  
+  if (isNetworkError) {
+    debug(`Uncaught network error (handled): ${err.code} - ${err.message}`);
+  } else {
+    errorWithTimestamp(`Uncaught exception: ${err.message}`);
+    debug('Stack trace:', err.stack);
+  }
+  // Don't exit - let the reconnection loop handle recovery
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  const err = reason instanceof Error ? reason : new Error(String(reason));
+  const isNetworkError = err.code === 'ENOTFOUND' || 
+                         err.code === 'ECONNREFUSED' || 
+                         err.code === 'ETIMEDOUT' ||
+                         err.code === 'EHOSTUNREACH' ||
+                         err.code === 'ENETUNREACH' ||
+                         err.code === 'ECONNRESET' ||
+                         err.code === 'EPIPE' ||
+                         err.message?.includes('ENOTFOUND') ||
+                         err.message?.includes('getaddrinfo');
+  
+  if (isNetworkError) {
+    debug(`Unhandled rejection (network error, handled): ${err.message}`);
+  } else {
+    errorWithTimestamp(`Unhandled rejection: ${err.message}`);
+    debug('Stack trace:', err.stack);
+  }
+  // Don't exit - let the reconnection loop handle recovery
+});
+
 const program = new Command();
 
 program
