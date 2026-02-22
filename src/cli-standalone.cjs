@@ -5,7 +5,7 @@ const { Command } = require('commander');
 const path = require('path');
 
 // Default configuration
-const DEFAULT_SERVER = 'tcp.relais.dev:1080';
+const DEFAULT_SERVER = 'tcp.relais.dev:1081';
 const DEFAULT_PROTOCOL = 'http';
 
 let debug = (...args) => {

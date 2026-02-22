@@ -5,7 +5,7 @@ const path = require('path');
 const url = require('url');
 
 // Default configuration
-const DEFAULT_SERVER = 'tcp.relais.dev:1080';
+const DEFAULT_SERVER = 'tcp.relais.dev:1081';
 const DEFAULT_PROTOCOL = 'http';
 
 let debug = (...args) => {
@@ -66,7 +66,7 @@ const program = new Command();
 program
   .name('relais')
   .description('Node.js client for the relay tunnel service')
-  .version('1.7.0');
+  .version('1.8.0');
 
 // Libère le raccourci -h pour l'option --host et déplace l'aide sur -H
 program.helpOption('-H, --help', 'Display help for command');

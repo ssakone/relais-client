@@ -57,7 +57,7 @@ relais tunnel -p 3000 --timeout 60 --restart-interval 60
 
 ### Full configuration with all optimizations:
 ```bash
-relais tunnel -s server:1080 -h localhost -p 3000 -k mytoken \
+relais tunnel -s server:1081 -h localhost -p 3000 -k mytoken \
   -d mysite.example.com -r 8080 -t http \
   --timeout 60 --restart-interval 120 -v
 ```

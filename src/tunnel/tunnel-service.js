@@ -130,9 +130,9 @@ export async function connectAndServe(options, failureTracker = null) {
   }
   const TUNNEL_ESTABLISHMENT_TIMEOUT = timeoutSeconds * 1000;
   
-  // Extract host from server option and ensure default port 1080
+  // Extract host from server option and ensure default port 1081
   const [serverHost, primaryPort] = options.server.split(':');
-  const primaryServer = `${serverHost}:${primaryPort || '1080'}`;
+  const primaryServer = `${serverHost}:${primaryPort || '1081'}`;
   
   // Always use the primary server; secondary failover is removed
   let currentServer = primaryServer;

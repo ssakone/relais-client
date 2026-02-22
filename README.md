@@ -44,7 +44,7 @@ relais tunnel [options]
 ```
 
 Available options:
-- `-s, --server <address>` : Relay server address (default: tcp.relais.dev:1080)
+- `-s, --server <address>` : Relay server address (default: tcp.relais.dev:1081)
 - `-h, --host <host>` : Local service host (default: localhost)
 - `-p, --port <port>` : Local service port (required)
 - `-k, --token <token>` : Authentication token (optional)

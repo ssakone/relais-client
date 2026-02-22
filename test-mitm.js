@@ -20,7 +20,7 @@ const net = require('net');
 
 const PROXY_PORT = 9999;
 const TARGET_HOST = 'tcp.relais.dev';
-const TARGET_PORT = 1080;
+const TARGET_PORT = 1081;
 
 // Couleurs pour la console
 const colors = {

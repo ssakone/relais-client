@@ -22,7 +22,7 @@ export class TunnelHealthChecker {
    * @param {string} options.tunnelType - Type de tunnel ('http' ou 'tcp')
    * @param {string} options.publicUrl - URL/adresse publique du tunnel (pour vérification HTTP ou TCP)
    * @param {number} options.publicPort - Port public du tunnel TCP
-   * @param {string} options.relayServer - Serveur relais (ex: 'tcp.relais.dev:1080')
+   * @param {string} options.relayServer - Serveur relais (ex: 'tcp.relais.dev:1081')
    * @param {number} options.checkInterval - Intervalle de vérification en ms (défaut: 30000)
    * @param {number} options.localPortTimeout - Timeout pour vérification port local en ms (défaut: 5000)
    * @param {number} options.tunnelTimeout - Timeout pour vérification tunnel en ms (défaut: 10000)
@@ -384,7 +384,7 @@ export class TunnelHealthChecker {
 
       const [host, port] = this.relayServer.includes(':') 
         ? this.relayServer.split(':') 
-        : [this.relayServer, '1080'];
+        : [this.relayServer, '1081'];
 
       const cleanup = () => {
         if (!resolved) {
