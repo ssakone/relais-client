@@ -302,10 +302,14 @@ export class TunnelHealthChecker {
         response.on('data', () => {});
         response.on('end', () => {});
 
-        // Tout code de réponse indique que le tunnel fonctionne
-        // (même 4xx ou 5xx signifie que la requête est passée par le tunnel)
-        const success = response.statusCode !== undefined;
-        debug(`Vérification tunnel HTTP: ${url} - Status: ${response.statusCode} - ${success ? 'OK' : 'ÉCHEC'}`);
+        // Les codes 2xx et 4xx indiquent que le tunnel fonctionne (la requête est passée)
+        // Les codes 3xx (redirections) et 5xx (erreurs serveur) indiquent un problème
+        const statusCode = response.statusCode;
+        const success = statusCode !== undefined &&
+                        statusCode >= 200 && statusCode < 500 &&
+                        statusCode !== 301 && statusCode !== 302 &&
+                        statusCode !== 307 && statusCode !== 308;
+        debug(`Vérification tunnel HTTP: ${url} - Status: ${statusCode} - ${success ? 'OK' : 'ÉCHEC'}`);
         resolve(success);
       });
 
