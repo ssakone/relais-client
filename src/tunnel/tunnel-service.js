@@ -8,6 +8,8 @@ import { TunnelHealthChecker } from '../utils/tunnel-health-checker.js';
 import { createSpinner } from '../utils/terminal-spinner.js';
 import { SecureChannel, SecureJSONDecoder, SecureJSONEncoder, encodeBinaryHandshake, BinaryHandshakeDecoder } from '../crypto/secure-channel.js';
 
+const CLIENT_HEARTBEAT_ACK = Object.freeze({ command: 'HEARTBEAT_ACK' });
+
 // Utility function to read a complete JSON message from socket
 function createJSONDecoder(socket) {
   let buffer = '';
@@ -85,31 +87,51 @@ function createJSONDecoder(socket) {
 
 // Heartbeat management for keeping connection alive
 function startHeartbeatMonitoring(socket, lastHeartbeatReceived) {
-  const heartbeatInterval = 30000; // 30 seconds to detect missing heartbeats
-  const warningInterval = 120000; // 2 minutes before showing warning
+  const heartbeatCheckInterval = 15000; // Check twice per expected server heartbeat window
+  const warningThreshold = 45000; // Warn after multiple missed heartbeats
+  const disconnectThreshold = 90000; // Force reconnect if control channel goes silent
   let warningShown = false;
   
   const checkHeartbeat = setInterval(() => {
     const now = Date.now();
     const timeSinceLastHeartbeat = now - lastHeartbeatReceived.value;
     
-    if (timeSinceLastHeartbeat > heartbeatInterval) {
-      debug(`No heartbeat received for ${timeSinceLastHeartbeat}ms, connection may be dead`);
+    if (timeSinceLastHeartbeat > disconnectThreshold) {
+      debug(`No heartbeat received for ${timeSinceLastHeartbeat}ms, control connection is stale`);
       clearInterval(checkHeartbeat);
       socket.destroy();
-    } else if (timeSinceLastHeartbeat > warningInterval && !warningShown) {
-      // Show warning after 2 minutes of no heartbeat
+    } else if (timeSinceLastHeartbeat > warningThreshold && !warningShown) {
       const lastHeartbeatDate = new Date(lastHeartbeatReceived.value).toISOString();
       errorWithTimestamp(`⚠️  No heartbeat received for ${Math.round(timeSinceLastHeartbeat/1000)}s (last: ${lastHeartbeatDate}) - server may be down`);
       warningShown = true;
     }
-  }, heartbeatInterval);
+  }, heartbeatCheckInterval);
   
   socket.on('close', () => {
     clearInterval(checkHeartbeat);
   });
   
   return { checkHeartbeat, warningShown: () => warningShown, resetWarning: () => { warningShown = false; } };
+}
+
+function createControlMessageWriter(socket, secureEncoder = null) {
+  return (message) => {
+    if (!socket || socket.destroyed || !socket.writable) {
+      return false;
+    }
+
+    try {
+      if (secureEncoder) {
+        secureEncoder.send(message);
+      } else {
+        socket.write(JSON.stringify(message) + '\n');
+      }
+      return true;
+    } catch (err) {
+      debug('Failed to send control message:', err);
+      return false;
+    }
+  };
 }
 
 export async function connectAndServe(options, failureTracker = null) {
@@ -312,7 +334,7 @@ export async function connectAndServe(options, failureTracker = null) {
       }
       establishSpinner.succeed('Tunnel established');
 
-      return { ctrlConn, decoder, response, secureChannel };
+      return { ctrlConn, decoder, response, secureChannel, secureEncoder };
     } catch (err) {
       try { createSpinner().fail('Connection failed'); } catch {}
       if (ctrlConn) {
@@ -329,7 +351,7 @@ export async function connectAndServe(options, failureTracker = null) {
     }, TUNNEL_ESTABLISHMENT_TIMEOUT);
   });
 
-  let ctrlConn, decoder, response, secureChannel;
+  let ctrlConn, decoder, response, secureChannel, secureEncoder;
   let healthMonitor = null;
   let isHealthMonitorConnLost = false;
   let tunnelHealthChecker = null;
@@ -341,6 +363,7 @@ export async function connectAndServe(options, failureTracker = null) {
     decoder = result.decoder;
     response = result.response;
     secureChannel = result.secureChannel;
+    secureEncoder = result.secureEncoder;
 
     // Display tunnel URL (keep user-facing)
     const publicAddr = response.public_addr;
@@ -359,25 +382,31 @@ export async function connectAndServe(options, failureTracker = null) {
     const heartbeatMonitor = startHeartbeatMonitoring(ctrlConn, lastHeartbeatReceived);
 
     // Initialize health monitoring
-    healthMonitor = new HealthMonitor();
-    
-    healthMonitor.start(
-      // onConnectionLost callback
-      () => {
-        isHealthMonitorConnLost = true;
-        debug('Health monitor detected server unreachable - forcing connection close');
-        // Force close the control connection to trigger reconnection
-        ctrlConn.destroy();
-      },
-      // onConnectionRestored callback
-      () => {
-        isHealthMonitorConnLost = false;
-        debug('Health monitor detected server recovery');
-        // La reconnexion sera gérée par la boucle de reconnexion automatique
-      }
-    );
+    const sendControlMessage = createControlMessageWriter(ctrlConn, secureEncoder);
 
-    debug('Monitoring de santé du serveur activé (vérification toutes les 3s)');
+    if (options.serverHealthMonitor !== false) {
+      healthMonitor = new HealthMonitor();
+      
+      healthMonitor.start(
+        // onConnectionLost callback
+        () => {
+          isHealthMonitorConnLost = true;
+          debug('Health monitor detected server unreachable - forcing connection close');
+          // Force close the control connection to trigger reconnection
+          ctrlConn.destroy();
+        },
+        // onConnectionRestored callback
+        () => {
+          isHealthMonitorConnLost = false;
+          debug('Health monitor detected server recovery');
+          // La reconnexion sera gérée par la boucle de reconnexion automatique
+        }
+      );
+
+      debug('Monitoring de santé du serveur activé (vérification toutes les 3s)');
+    } else {
+      debug('Monitoring de santé du serveur désactivé pour cette session');
+    }
 
     // Initialize tunnel health checker for local port and tunnel verification
     if (options.healthCheck !== false) {
@@ -447,6 +476,13 @@ export async function connectAndServe(options, failureTracker = null) {
           
           // Update last heartbeat timestamp
           lastHeartbeatReceived.value = Date.now();
+
+          // Answer heartbeats so the server can detect half-open control sockets.
+          if (!sendControlMessage(CLIENT_HEARTBEAT_ACK)) {
+            debug('Failed to send heartbeat acknowledgement, forcing reconnect');
+            ctrlConn.destroy();
+            continue;
+          }
           
           // Show success message if we were in warning state
           if (wasWarningShown) {
@@ -532,7 +568,7 @@ export async function runTunnel(options) {
         
         // Create a temporary health monitor to wait for server recovery
         const tempHealthMonitor = new HealthMonitor();
-        await tempHealthMonitor.waitForServerRecovery();
+        await tempHealthMonitor.waitForServerRecovery(true);
         tempHealthMonitor.stop();
         
         debug('Serveur rétabli - Reprise de la connexion tunnel...');

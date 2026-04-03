@@ -193,8 +193,8 @@ export class HealthMonitor {
    * Attendeur qui bloque jusqu'à ce que le serveur soit de nouveau accessible
    * @returns {Promise<void>}
    */
-  async waitForServerRecovery() {
-    if (!this.currentlyDown) {
+  async waitForServerRecovery(forceWait = false) {
+    if (!forceWait && !this.currentlyDown) {
       return; // Le serveur est déjà accessible
     }
 
@@ -205,14 +205,14 @@ export class HealthMonitor {
         try {
           const isHealthy = await this.checkServerHealth();
           if (isHealthy) {
-            clearInterval(checkRecovery);
-            this.handleHealthyResponse();
-            resolve();
+              clearInterval(checkRecovery);
+              this.handleHealthyResponse();
+              resolve();
           }
         } catch (error) {
           // Continue d'attendre
         }
-      }, this.checkInterval);
+      }, this.checkIntervalWhenDown);
     });
   }
 

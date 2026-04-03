@@ -265,7 +265,7 @@ program
           // Create a temporary health monitor to wait for server recovery
           const { HealthMonitor } = await import('./utils/health-monitor.js');
           const tempHealthMonitor = new HealthMonitor();
-          await tempHealthMonitor.waitForServerRecovery();
+          await tempHealthMonitor.waitForServerRecovery(true);
           tempHealthMonitor.stop();
           
           debug('Serveur rétabli - Reprise de la connexion tunnel...');

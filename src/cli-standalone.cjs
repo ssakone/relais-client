@@ -298,7 +298,7 @@ program
           // Create a temporary health monitor to wait for server recovery
           const healthMonitorModule = require('./utils/health-monitor.js');
           const tempHealthMonitor = new healthMonitorModule.HealthMonitor();
-          await tempHealthMonitor.waitForServerRecovery();
+          await tempHealthMonitor.waitForServerRecovery(true);
           tempHealthMonitor.stop();
           
           debug('Serveur rétabli - Reprise de la connexion tunnel...');
@@ -350,4 +350,3 @@ program
   });
 
 program.parse();
-
