@@ -5,7 +5,7 @@ import https from 'https';
 import dns from 'dns/promises';
 import { execSync } from 'child_process';
 
-const RELAY_SERVER = 'tcp.relais.dev:1080';
+const RELAY_SERVER = 'tcp.relais.dev:1081';
 const HEALTH_URL = 'https://relais.dev/api/health';
 
 console.log('🔍 Diagnostic réseau pour Relais Tunnel\n');
@@ -155,7 +155,7 @@ async function checkFirewall() {
     { port: 80, name: 'HTTP' },
     { port: 443, name: 'HTTPS' },
     { port: 22, name: 'SSH' },
-    { port: 1080, name: 'Relay' }
+    { port: 1081, name: 'Relay' }
   ];
   
   const host = RELAY_SERVER.split(':')[0];
@@ -199,7 +199,7 @@ async function runDiagnostics() {
   await checkFirewall();
   
   console.log('📊 Résumé du diagnostic:');
-  console.log('   - Si HTTPS fonctionne mais pas TCP 1080: Problème de pare-feu/ISP');
+  console.log('   - Si HTTPS fonctionne mais pas TCP 1081: Problème de pare-feu/ISP');
   console.log('   - Si ping fonctionne mais pas TCP: Port bloqué');
   console.log('   - Si MTU < 1500: Fragmentation réseau');
   console.log('   - Si connexion TCP lente: Problème de latence/routing');

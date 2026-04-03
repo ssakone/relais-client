@@ -15,14 +15,16 @@ import { ConnectionFailureTracker } from '../utils/failure-tracker.js';
  * @param {Object} options - Tunnel options
  * @param {string} options.port - Local service port (required)
  * @param {string} [options.host='localhost'] - Local service host
- * @param {string} [options.server='tcp.relais.dev:1080'] - Relay server address
+ * @param {string} [options.server='tcp.relais.dev:1081'] - Relay server address
  * @param {string} [options.type='http'] - Protocol type ('http' or 'tcp')
  * @param {string} [options.domain] - Custom domain
  * @param {string} [options.remote] - Desired remote port
  * @param {string} [options.token] - Authentication token
  * @param {string} [options.timeout='30'] - Tunnel establishment timeout in seconds
- * @param {string} [options.restartInterval='30'] - Tunnel restart interval in minutes
  * @param {boolean} [options.persistent=true] - Enable persistent reconnection on network failures
+ * @param {boolean} [options.healthCheck=true] - Enable tunnel health checks
+ * @param {string} [options.healthCheckInterval='30'] - Tunnel health check interval in seconds
+ * @param {boolean} [options.insecure=false] - Disable encrypted tunnel mode
  * @param {boolean} [options.verbose=false] - Enable detailed logging
  * @param {Function} [options.onConnecting] - Callback when connecting (host, port)
  * @param {Function} [options.onConnected] - Callback when connected (duration)
@@ -44,11 +46,13 @@ export async function createTunnel(options) {
   // Set defaults
   const tunnelOptions = {
     host: 'localhost',
-    server: 'tcp.relais.dev:1080',
+    server: 'tcp.relais.dev:1081',
     type: 'http',
     timeout: '30',
-    restartInterval: '30',
     persistent: true,
+    healthCheck: true,
+    healthCheckInterval: '30',
+    insecure: false,
     verbose: false,
     ...options
   };
@@ -171,11 +175,13 @@ export async function createPersistentTunnel(options) {
   // Set defaults
   const tunnelOptions = {
     host: 'localhost',
-    server: 'tcp.relais.dev:1080',
+    server: 'tcp.relais.dev:1081',
     type: 'http',
     timeout: '30',
-    restartInterval: '30',
     persistent: true,
+    healthCheck: true,
+    healthCheckInterval: '30',
+    insecure: false,
     verbose: false,
     ...options
   };

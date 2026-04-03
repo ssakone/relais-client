@@ -5,7 +5,7 @@ const { Command } = require('commander');
 const path = require('path');
 
 // Default configuration
-const DEFAULT_SERVER = 'tcp.relais.dev:1080';
+const DEFAULT_SERVER = 'tcp.relais.dev:1081';
 const DEFAULT_PROTOCOL = 'http';
 
 let debug = (...args) => {
@@ -20,12 +20,56 @@ let errorWithTimestamp = (...args) => {
   console.error(`[${timestamp}]`, ...args);
 };
 
+// Global error handlers to prevent crashes from unhandled errors
+process.on('uncaughtException', (err) => {
+  // Only log network-related errors at debug level, don't crash
+  const isNetworkError = err.code === 'ENOTFOUND' || 
+                         err.code === 'ECONNREFUSED' || 
+                         err.code === 'ETIMEDOUT' ||
+                         err.code === 'EHOSTUNREACH' ||
+                         err.code === 'ENETUNREACH' ||
+                         err.code === 'ECONNRESET' ||
+                         err.code === 'EPIPE';
+  
+  if (isNetworkError) {
+    debug(`Uncaught network error (handled): ${err.code} - ${err.message}`);
+  } else {
+    errorWithTimestamp(`Uncaught exception: ${err.message}`);
+    debug('Stack trace:', err.stack);
+  }
+  // Don't exit - let the reconnection loop handle recovery
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  const err = reason instanceof Error ? reason : new Error(String(reason));
+  const isNetworkError = err.code === 'ENOTFOUND' || 
+                         err.code === 'ECONNREFUSED' || 
+                         err.code === 'ETIMEDOUT' ||
+                         err.code === 'EHOSTUNREACH' ||
+                         err.code === 'ENETUNREACH' ||
+                         err.code === 'ECONNRESET' ||
+                         err.code === 'EPIPE' ||
+                         err.message?.includes('ENOTFOUND') ||
+                         err.message?.includes('getaddrinfo');
+  
+  if (isNetworkError) {
+    debug(`Unhandled rejection (network error, handled): ${err.message}`);
+  } else {
+    errorWithTimestamp(`Unhandled rejection: ${err.message}`);
+    debug('Stack trace:', err.stack);
+  }
+  // Don't exit - let the reconnection loop handle recovery
+});
+
 const program = new Command();
 
 program
   .name('relais')
   .description('Node.js client for the relay tunnel service')
   .version('1.4.2');
+
+// Libère le raccourci -h pour l'option --host et déplace l'aide sur -H
+program.helpOption('-H, --help', 'Display help for command');
 
 program
   .command('set-token <token>')
@@ -188,7 +232,9 @@ program
   .option('-r, --remote <port>', 'Desired remote port')
   .option('-t, --type <type>', 'Protocol type (http or tcp)', DEFAULT_PROTOCOL)
   .option('--timeout <seconds>', 'Tunnel establishment timeout in seconds', '30')
-  .option('--restart-interval <minutes>', 'Tunnel restart interval in minutes', '30')
+  .option('--health-check', 'Enable tunnel health checking (default: enabled)', true)
+  .option('--no-health-check', 'Disable tunnel health checking')
+  .option('--health-check-interval <seconds>', 'Health check interval in seconds', '30')
   .option('-v, --verbose', 'Enable detailed logging')
   .action(async (options) => {
     if (options.verbose) {
@@ -206,7 +252,8 @@ program
       domain: options.domain,
       remote: options.remote,
       timeout: options.timeout,
-      restartInterval: options.restartInterval
+      healthCheck: options.healthCheck,
+      healthCheckInterval: options.healthCheckInterval
     });
 
     if (!options.port) {
@@ -251,7 +298,7 @@ program
           // Create a temporary health monitor to wait for server recovery
           const healthMonitorModule = require('./utils/health-monitor.js');
           const tempHealthMonitor = new healthMonitorModule.HealthMonitor();
-          await tempHealthMonitor.waitForServerRecovery();
+          await tempHealthMonitor.waitForServerRecovery(true);
           tempHealthMonitor.stop();
           
           debug('Serveur rétabli - Reprise de la connexion tunnel...');
@@ -269,9 +316,11 @@ program
           continue;
         }
 
-        if (err.message.includes('Tunnel restart interval reached')) {
-          debug('Redémarrage périodique du tunnel');
+        // Handle tunnel health check triggered reconnection
+        if (err.message.includes('Tunnel health check triggered reconnection')) {
+          errorWithTimestamp('🔄 Reconnexion du tunnel déclenchée par la vérification de santé...');
           failureTracker.reset();
+          // Immediate retry without backoff
           continue;
         }
 
@@ -301,4 +350,3 @@ program
   });
 
 program.parse();
-

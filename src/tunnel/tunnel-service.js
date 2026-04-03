@@ -1,15 +1,19 @@
 import { Socket } from 'net';
-import { TunnelRequest } from '../models/messages.js';
+import { TunnelRequest, SecureHandshakeInit } from '../models/messages.js';
 import { setKeepAlive, setNoDelay, handleNewConnection, optimizeSocket } from '../network/connection.js';
 import { debug, errorWithTimestamp } from '../utils/debug.js';
 import { ConnectionFailureTracker } from '../utils/failure-tracker.js';
 import { HealthMonitor } from '../utils/health-monitor.js';
+import { TunnelHealthChecker } from '../utils/tunnel-health-checker.js';
 import { createSpinner } from '../utils/terminal-spinner.js';
+import { SecureChannel, SecureJSONDecoder, SecureJSONEncoder, encodeBinaryHandshake, BinaryHandshakeDecoder } from '../crypto/secure-channel.js';
+
+const CLIENT_HEARTBEAT_ACK = Object.freeze({ command: 'HEARTBEAT_ACK' });
 
 // Utility function to read a complete JSON message from socket
 function createJSONDecoder(socket) {
   let buffer = '';
-  
+
   return {
     decode() {
       return new Promise((resolve, reject) => {
@@ -83,47 +87,60 @@ function createJSONDecoder(socket) {
 
 // Heartbeat management for keeping connection alive
 function startHeartbeatMonitoring(socket, lastHeartbeatReceived) {
-  const heartbeatInterval = 30000; // 30 seconds to detect missing heartbeats
-  const warningInterval = 120000; // 2 minutes before showing warning
+  const heartbeatCheckInterval = 15000; // Check twice per expected server heartbeat window
+  const warningThreshold = 45000; // Warn after multiple missed heartbeats
+  const disconnectThreshold = 90000; // Force reconnect if control channel goes silent
   let warningShown = false;
-  
+
   const checkHeartbeat = setInterval(() => {
     const now = Date.now();
     const timeSinceLastHeartbeat = now - lastHeartbeatReceived.value;
-    
-    if (timeSinceLastHeartbeat > heartbeatInterval) {
-      debug(`No heartbeat received for ${timeSinceLastHeartbeat}ms, connection may be dead`);
+
+    if (timeSinceLastHeartbeat > disconnectThreshold) {
+      debug(`No heartbeat received for ${timeSinceLastHeartbeat}ms, control connection is stale`);
       clearInterval(checkHeartbeat);
       socket.destroy();
-    } else if (timeSinceLastHeartbeat > warningInterval && !warningShown) {
-      // Show warning after 2 minutes of no heartbeat
+    } else if (timeSinceLastHeartbeat > warningThreshold && !warningShown) {
       const lastHeartbeatDate = new Date(lastHeartbeatReceived.value).toISOString();
       errorWithTimestamp(`⚠️  No heartbeat received for ${Math.round(timeSinceLastHeartbeat/1000)}s (last: ${lastHeartbeatDate}) - server may be down`);
       warningShown = true;
     }
-  }, heartbeatInterval);
-  
+  }, heartbeatCheckInterval);
+
   socket.on('close', () => {
     clearInterval(checkHeartbeat);
   });
-  
+
   return { checkHeartbeat, warningShown: () => warningShown, resetWarning: () => { warningShown = false; } };
+}
+
+function createControlMessageWriter(socket, secureEncoder = null) {
+  return (message) => {
+    if (!socket || socket.destroyed || !socket.writable) {
+      return false;
+    }
+
+    try {
+      if (secureEncoder) {
+        secureEncoder.send(message);
+      } else {
+        socket.write(JSON.stringify(message) + '\n');
+      }
+      return true;
+    } catch (err) {
+      debug('Failed to send control message:', err);
+      return false;
+    }
+  };
 }
 
 export async function connectAndServe(options, failureTracker = null) {
   debug('Starting tunnel service');
 
-  // Validate and use user-defined restart interval or default to 30 minutes
-  let restartIntervalMinutes = parseInt(options.restartInterval);
-  if (isNaN(restartIntervalMinutes) || restartIntervalMinutes < 1 || restartIntervalMinutes > 1440) {
-    if (options.restartInterval && options.restartInterval !== '30') {
-      debug(`Invalid restart interval value: ${options.restartInterval}, using default of 30 minutes`);
-      errorWithTimestamp(`⚠️  Invalid restart interval value: ${options.restartInterval}. Using default of 30 minutes. Valid range: 1-1440 minutes.`);
-    }
-    restartIntervalMinutes = 30;
-  }
-  const RESTART_INTERVAL_MS = restartIntervalMinutes * 60 * 1000;
-  
+  // Normalize local host value early so it can be reused consistently
+  const localHost = options.host || 'localhost';
+  options.host = localHost;
+
   // Validate and use user-defined timeout or default to 30 seconds
   let timeoutSeconds = parseInt(options.timeout);
   if (isNaN(timeoutSeconds) || timeoutSeconds < 1 || timeoutSeconds > 300) {
@@ -134,24 +151,24 @@ export async function connectAndServe(options, failureTracker = null) {
     timeoutSeconds = 30;
   }
   const TUNNEL_ESTABLISHMENT_TIMEOUT = timeoutSeconds * 1000;
-  
-  // Extract host from server option and ensure default port 1080
+
+  // Extract host from server option and ensure default port 1081
   const [serverHost, primaryPort] = options.server.split(':');
-  const primaryServer = `${serverHost}:${primaryPort || '1080'}`;
-  
+  const primaryServer = `${serverHost}:${primaryPort || '1081'}`;
+
   // Always use the primary server; secondary failover is removed
   let currentServer = primaryServer;
-  
+
   const establishmentPromise = (async () => {
     // Connect to relay server (control channel)
-    const ctrlConn = new Socket();
+    let ctrlConn = new Socket();
     const [connHost, connPort] = currentServer.split(':');
 
     try {
       const connectSpinner = createSpinner(`Connecting to ${connHost}:${connPort}`).start();
       debug(`Attempting TCP connection to ${connHost}:${connPort}`);
       const connectionStartTime = Date.now();
-      
+
       await new Promise((resolve, reject) => {
         // Add connection timeout handler
         const connectTimeout = setTimeout(() => {
@@ -159,15 +176,42 @@ export async function connectAndServe(options, failureTracker = null) {
           ctrlConn.destroy();
           reject(new Error(`Connection timeout to ${connHost}:${connPort}`));
         }, 15000); // 15 seconds for initial TCP connection (increased for slow server)
-        
+
         // Add exponential backoff for DNS resolution
         let dnsRetries = 0;
         const maxDnsRetries = 3;
-        
+        let isResolved = false;
+
+        // Attach error handler to current socket - must be called each time we create a new socket
+        const attachErrorHandler = () => {
+          ctrlConn.on('error', (err) => {
+            if (isResolved) return; // Ignore errors after resolution
+
+            if (err.code === 'ENOTFOUND' && dnsRetries < maxDnsRetries) {
+              dnsRetries++;
+              debug(`DNS resolution failed, retry ${dnsRetries}/${maxDnsRetries}`);
+              setTimeout(() => {
+                try {
+                  ctrlConn.destroy();
+                } catch (e) {
+                  // Ignore destroy errors
+                }
+                ctrlConn = new Socket();
+                attachErrorHandler(); // Re-attach error handler to new socket
+                attemptConnection();
+              }, Math.pow(2, dnsRetries) * 1000); // Exponential backoff: 2s, 4s, 8s
+            } else {
+              clearTimeout(connectTimeout);
+              debug(`Connection error after ${Date.now() - connectionStartTime}ms:`, err.message);
+              reject(err);
+            }
+          });
+        };
+
         const attemptConnection = () => {
           // Enable TCP optimizations before connection
           ctrlConn.setNoDelay(true); // Disable Nagle's algorithm for faster small packets
-          
+
           ctrlConn.connect(
             {
               host: connHost,
@@ -181,16 +225,17 @@ export async function connectAndServe(options, failureTracker = null) {
               // Enable TCP Fast Open if available
               hints: 0, // DNS resolution hints
             },
-           
+
             () => {
+              isResolved = true;
               clearTimeout(connectTimeout);
               const connectionTime = Date.now() - connectionStartTime;
               debug(`Connected to relay server: ${currentServer} (took ${connectionTime}ms)`);
               connectSpinner.succeed(`Connected to ${connHost}:${connPort} (${connectionTime}ms)`);
-              
+
               // Apply comprehensive TCP optimizations after connection
               optimizeSocket(ctrlConn);
-              
+
               // Additional timeout handler
               ctrlConn.on('timeout', () => {
                 debug('Control connection timed out');
@@ -200,27 +245,58 @@ export async function connectAndServe(options, failureTracker = null) {
             }
           );
         };
-        
-        ctrlConn.on('error', (err) => {
-          if (err.code === 'ENOTFOUND' && dnsRetries < maxDnsRetries) {
-            dnsRetries++;
-            debug(`DNS resolution failed, retry ${dnsRetries}/${maxDnsRetries}`);
-            setTimeout(() => {
-              ctrlConn.destroy();
-              ctrlConn = new Socket();
-              attemptConnection();
-            }, Math.pow(2, dnsRetries) * 1000); // Exponential backoff: 2s, 4s, 8s
-          } else {
-            clearTimeout(connectTimeout);
-            debug(`Connection error after ${Date.now() - connectionStartTime}ms:`, err.message);
-            reject(err);
-          }
-        });
-        
+
+        attachErrorHandler();
         attemptConnection();
       });
 
-      // Send tunnel request in JSON
+      // Initialize secure channel (enabled by default, disabled with --insecure)
+      let secureChannel = null;
+      let secureEncoder = null;
+      let decoder = null;
+
+      if (!options.insecure) {
+        debug('Secure mode enabled - initiating key exchange');
+
+        // Create secure channel and generate keypair
+        secureChannel = new SecureChannel();
+
+        // Send secure handshake init using binary protocol
+        // Binary format is used to bypass DPI proxies that block JSON on mobile networks
+        const handshakeInit = new SecureHandshakeInit(secureChannel.getPublicKey());
+        debug('Sending SECURE_INIT with public key (binary protocol)');
+        const binaryHandshake = encodeBinaryHandshake(handshakeInit);
+        ctrlConn.write(binaryHandshake);
+
+        // Wait for server's handshake response (binary format)
+        const handshakeDecoder = new BinaryHandshakeDecoder(ctrlConn);
+        const handshakeResponse = await handshakeDecoder.decode();
+        debug('Received handshake response:', handshakeResponse);
+
+        if (handshakeResponse.command !== 'SECURE_ACK' || handshakeResponse.status !== 'OK') {
+          throw new Error(`Secure handshake failed: ${handshakeResponse.error || 'Unknown error'}`);
+        }
+
+        // Derive shared secret from server's public key
+        secureChannel.deriveSharedSecret(handshakeResponse.server_public_key);
+        debug('Shared secret derived successfully');
+
+        // Get any remaining buffer from handshake decoder (in case server sent more data)
+        const remainingBuffer = handshakeDecoder.getRemainingBuffer();
+        if (remainingBuffer.length > 0) {
+          debug(`Passing ${remainingBuffer.length} bytes from handshake decoder to secure decoder`);
+        }
+
+        // Create secure encoder and decoder, passing remaining buffer
+        secureEncoder = new SecureJSONEncoder(ctrlConn, secureChannel);
+        decoder = new SecureJSONDecoder(ctrlConn, secureChannel, remainingBuffer);
+      } else {
+        // Create plaintext JSON decoder for control connection
+        debug('Insecure mode - encryption disabled');
+        decoder = createJSONDecoder(ctrlConn);
+      }
+
+      // Send tunnel request (encrypted if secure mode)
       const request = new TunnelRequest(
         'TUNNEL',
         options.port.toString(),
@@ -233,10 +309,14 @@ export async function connectAndServe(options, failureTracker = null) {
       debug('Sending tunnel request:', JSON.stringify(request));
       const establishSpinner = createSpinner('Establishing tunnel').start();
       const requestSentTime = Date.now();
-      ctrlConn.write(JSON.stringify(request) + '\n');
 
-      // Create JSON decoder for control connection
-      const decoder = createJSONDecoder(ctrlConn);
+      if (secureEncoder) {
+        // Send encrypted tunnel request
+        secureEncoder.send(request);
+      } else {
+        // Send plaintext tunnel request
+        ctrlConn.write(JSON.stringify(request) + '\n');
+      }
 
       // Wait for initial response
       debug('Waiting for server response...');
@@ -253,8 +333,8 @@ export async function connectAndServe(options, failureTracker = null) {
         throw new Error(`Server error: ${response.error}`);
       }
       establishSpinner.succeed('Tunnel established');
-      
-      return { ctrlConn, decoder, response };
+
+      return { ctrlConn, decoder, response, secureChannel, secureEncoder };
     } catch (err) {
       try { createSpinner().fail('Connection failed'); } catch {}
       if (ctrlConn) {
@@ -271,16 +351,19 @@ export async function connectAndServe(options, failureTracker = null) {
     }, TUNNEL_ESTABLISHMENT_TIMEOUT);
   });
 
-  let ctrlConn, decoder, response;
+  let ctrlConn, decoder, response, secureChannel, secureEncoder;
   let healthMonitor = null;
   let isHealthMonitorConnLost = false;
-  let restartTimer;
-  
+  let tunnelHealthChecker = null;
+  let tunnelHealthCheckTriggeredReconnect = false;
+
   try {
     const result = await Promise.race([establishmentPromise, timeoutPromise]);
     ctrlConn = result.ctrlConn;
     decoder = result.decoder;
     response = result.response;
+    secureChannel = result.secureChannel;
+    secureEncoder = result.secureEncoder;
 
     // Notify caller that connection is established (for stop functionality)
     if (options.onConnectionEstablished && typeof options.onConnectionEstablished === 'function') {
@@ -304,46 +387,79 @@ export async function connectAndServe(options, failureTracker = null) {
     const heartbeatMonitor = startHeartbeatMonitoring(ctrlConn, lastHeartbeatReceived);
 
     // Initialize health monitoring
-    healthMonitor = new HealthMonitor();
-    
-    healthMonitor.start(
-      // onConnectionLost callback
-      () => {
-        isHealthMonitorConnLost = true;
-        debug('Health monitor detected server unreachable - forcing connection close');
-        // Force close the control connection to trigger reconnection
-        ctrlConn.destroy();
-      },
-      // onConnectionRestored callback
-      () => {
-        isHealthMonitorConnLost = false;
-        debug('Health monitor detected server recovery');
-        // La reconnexion sera gérée par la boucle de reconnexion automatique
-      }
-    );
+    const sendControlMessage = createControlMessageWriter(ctrlConn, secureEncoder);
 
-    debug('Monitoring de santé du serveur activé (vérification toutes les 3s)');
+    if (options.serverHealthMonitor !== false) {
+      healthMonitor = new HealthMonitor();
 
-    // Log restart interval configuration
-    debug(`Redémarrage automatique du tunnel configuré: toutes les ${restartIntervalMinutes} minutes`);
+      healthMonitor.start(
+        // onConnectionLost callback
+        () => {
+          isHealthMonitorConnLost = true;
+          debug('Health monitor detected server unreachable - forcing connection close');
+          // Force close the control connection to trigger reconnection
+          ctrlConn.destroy();
+        },
+        // onConnectionRestored callback
+        () => {
+          isHealthMonitorConnLost = false;
+          debug('Health monitor detected server recovery');
+          // La reconnexion sera gérée par la boucle de reconnexion automatique
+        }
+      );
 
-    // Flag to indicate that the periodic restart timer has fired.
-    let restartTriggered = false;
+      debug('Monitoring de santé du serveur activé (vérification toutes les 3s)');
+    } else {
+      debug('Monitoring de santé du serveur désactivé pour cette session');
+    }
 
-    // Timer to restart the tunnel periodically
-    restartTimer = setTimeout(() => {
-      debug('Restart interval reached - restarting tunnel');
-      restartTriggered = true;
+    // Initialize tunnel health checker for local port and tunnel verification
+    if (options.healthCheck !== false) {
+      // Convert seconds to milliseconds (CLI passes seconds, default to 30 seconds)
+      const healthCheckIntervalSeconds = parseInt(options.healthCheckInterval) || 30;
+      const healthCheckInterval = healthCheckIntervalSeconds * 1000;
 
-      // Destroying the socket will eventually reject any pending decoder.decode()
-      // call, but if the timer fires in the short gap **between** two decode()
-      // invocations there might be no active error/end listener yet. Keeping this
-      // flag allows the main loop to notice the restart request immediately on
-      // the next iteration so we never miss a scheduled restart.
-      if (ctrlConn) {
-        ctrlConn.destroy();
-      }
-    }, RESTART_INTERVAL_MS);
+      // Parse public address for health checks
+      // For HTTP: publicAddr is like "myapp.relais.dev:443" -> we need "myapp.relais.dev"
+      // For TCP: publicAddr is like "tcp.relais.dev:12345" -> we need host and port separately
+      const [publicHost, publicPort] = publicAddr.split(':');
+      const tunnelTypeLabel = options.type === 'tcp' ? 'TCP' : 'HTTP';
+
+      tunnelHealthChecker = new TunnelHealthChecker({
+        localHost,
+        localPort: parseInt(options.port),
+        tunnelType: options.type || 'http',
+        publicUrl: publicHost,
+        publicPort: options.type === 'tcp' ? publicPort : null,
+        relayServer: currentServer.split(':')[0],
+        checkInterval: healthCheckInterval,
+      });
+
+      tunnelHealthChecker.start({
+        onLocalPortDown: () => {
+          errorWithTimestamp(`🔴 Le service local sur le port ${options.port} ne répond plus`);
+        },
+        onLocalPortRestored: () => {
+          console.log(`✅ Le service local sur le port ${options.port} est de nouveau accessible`);
+        },
+        onTunnelDown: () => {
+          debug(`Tunnel ${tunnelTypeLabel} détecté comme non fonctionnel`);
+        },
+        onTunnelRestored: () => {
+          console.log(`✅ Le tunnel ${tunnelTypeLabel} fonctionne à nouveau`);
+        },
+        onReconnectNeeded: () => {
+          debug('TunnelHealthChecker a déclenché une demande de reconnexion');
+          tunnelHealthCheckTriggeredReconnect = true;
+          // Force la fermeture de la connexion de contrôle pour déclencher la reconnexion
+          if (ctrlConn) {
+            ctrlConn.destroy();
+          }
+        },
+      });
+
+      debug(`Vérification de santé du tunnel ${tunnelTypeLabel} activée (intervalle: ${healthCheckIntervalSeconds}s)`);
+    }
 
     // Main loop to receive new connections
     while (true) {
@@ -354,13 +470,6 @@ export async function connectAndServe(options, failureTracker = null) {
           debug('Message received:', msg);
         }
 
-        // If the restart timer fired while we were waiting for a message, bail
-        // out right away so that the upper reconnect-loop can spin up a fresh
-        // tunnel without any back-off.
-        if (restartTriggered) {
-          throw new Error('Tunnel restart interval reached');
-        }
-
         if (msg.command === 'NEWCONN') {
           // Handle new connection asynchronously.
           handleNewConnection(options, msg).catch((err) => {
@@ -369,10 +478,17 @@ export async function connectAndServe(options, failureTracker = null) {
         } else if (msg.command === 'HEARTBEAT') {
           // Check if we were in warning state before updating timestamp
           const wasWarningShown = heartbeatMonitor.warningShown();
-          
+
           // Update last heartbeat timestamp
           lastHeartbeatReceived.value = Date.now();
-          
+
+          // Answer heartbeats so the server can detect half-open control sockets.
+          if (!sendControlMessage(CLIENT_HEARTBEAT_ACK)) {
+            debug('Failed to send heartbeat acknowledgement, forcing reconnect');
+            ctrlConn.destroy();
+            continue;
+          }
+
           // Show success message if we were in warning state
           if (wasWarningShown) {
             debug(`Server is alive again! Heartbeat resumed at ${new Date().toISOString()}`);
@@ -382,12 +498,6 @@ export async function connectAndServe(options, failureTracker = null) {
           debug('Unexpected message received:', msg);
         }
       } catch (err) {
-        // If we already know that a periodic restart was requested, propagate a
-        // dedicated error so that the outer loop can react without delay.
-        if (restartTriggered) {
-          throw new Error('Tunnel restart interval reached');
-        }
-
         // If the connection is closed by the server, this is where we track it
         if (err.message === 'Connection closed by server') {
           // Don't record failure here - let the caller handle it
@@ -399,29 +509,35 @@ export async function connectAndServe(options, failureTracker = null) {
     }
   } catch (err) {
     debug('Error in connectAndServe:', err);
-    
+
+    // Check if the error was caused by tunnel health checker
+    if (tunnelHealthCheckTriggeredReconnect) {
+      throw new Error('Tunnel health check triggered reconnection');
+    }
+
     // Check if the error was caused by health monitor
     if (isHealthMonitorConnLost) {
       throw new Error('Connection lost due to server health check failure');
     }
-    
+
     // Check if it's a tunnel establishment timeout
     if (err.message.includes('Tunnel establishment timeout')) {
       // Pass through the original timeout message with the correct duration
       throw err;
     }
-    
+
     throw err;
   } finally {
+    // Stop tunnel health checker
+    if (tunnelHealthChecker && typeof tunnelHealthChecker.stop === 'function') {
+      tunnelHealthChecker.stop();
+      debug('Tunnel health checker stopped');
+    }
+
     // Stop health monitoring
     if (healthMonitor && typeof healthMonitor.stop === 'function') {
       healthMonitor.stop();
       debug('Health monitor stopped');
-    }
-
-    // Clear periodic restart timer
-    if (typeof restartTimer !== 'undefined') {
-      clearTimeout(restartTimer);
     }
 
     if (ctrlConn) {
@@ -437,24 +553,24 @@ export async function connectAndServe(options, failureTracker = null) {
 /**
  * Wraps connectAndServe() with an auto-reconnect loop.
  * If the control connection fails due to network issues,
- * it waits for 5 seconds before retrying.
+ * it retries using the failure tracker's backoff policy.
  */
 export async function runTunnel(options) {
   const failureTracker = new ConnectionFailureTracker();
   const isPersistent = options.persistent !== false; // Default to true
-  
+
   if (isPersistent) {
     debug('Mode persistance activé - Reconnexion automatique en cas de panne réseau');
   }
-  
+
   while (true) {
     try {
       // Agent mode: Never stop reconnecting for network errors, only for authentication issues
       await connectAndServe(options, failureTracker);
-      
+
       // Reset failure tracker on successful connection
       failureTracker.reset();
-      
+
     } catch (err) {
       // Handle health monitor connection loss specifically
       if (err.message.includes('Connection lost due to server health check failure')) {
@@ -462,20 +578,19 @@ export async function runTunnel(options) {
           // Si pas en mode persistant, propager l'erreur
           throw err;
         }
-        
+
         errorWithTimestamp('Connexion fermée par le monitoring de santé - Attente du rétablissement...');
-        
+
         // Create a temporary health monitor to wait for server recovery
         const tempHealthMonitor = new HealthMonitor();
-        // IMPORTANT: forceCheck=true pour toujours vérifier même si currentlyDown=false
         await tempHealthMonitor.waitForServerRecovery(true);
         tempHealthMonitor.stop();
-        
+
         debug('Serveur rétabli - Reprise de la connexion tunnel...');
         // Continue to reconnect immediately without backoff
         continue;
       }
-      
+
       // Handle tunnel establishment timeout specifically
       if (err.message.includes('Tunnel establishment timeout')) {
         const timeoutMatch = err.message.match(/(\d+) seconds/);
@@ -485,13 +600,14 @@ export async function runTunnel(options) {
         continue;
       }
 
-      // Handle periodic restart without backoff
-        if (err.message.includes('Tunnel restart interval reached')) {
-          debug('Redémarrage périodique du tunnel');
-          failureTracker.reset();
-          continue;
-        }
-      
+      // Handle tunnel health check triggered reconnection
+      if (err.message.includes('Tunnel health check triggered reconnection')) {
+        errorWithTimestamp('🔄 Reconnexion du tunnel déclenchée par la vérification de santé...');
+        // Immediate retry without backoff
+        failureTracker.reset();
+        continue;
+      }
+
       // Determine error type and handle accordingly
       if (err.message.includes('Connection closed by server')) {
         failureTracker.recordServerClosure();

@@ -40,7 +40,7 @@ export class HealthMonitor {
     this.currentlyDown = false;
 
     debug('Starting health monitor...', this.healthUrl);
-    
+
     // Start with normal interval
     this.scheduleNextCheck(this.checkInterval);
 
@@ -70,7 +70,7 @@ export class HealthMonitor {
   async performHealthCheck() {
     try {
       const isHealthy = await this.checkServerHealth();
-      
+
       if (isHealthy) {
         this.handleHealthyResponse();
       } else {
@@ -88,7 +88,7 @@ export class HealthMonitor {
   checkServerHealth() {
     return new Promise((resolve) => {
       const timeout = 10000; // 10 secondes de timeout
-      
+
       const request = https.get(this.healthUrl, {
         timeout: timeout,
         headers: {
@@ -96,19 +96,19 @@ export class HealthMonitor {
         }
       }, (response) => {
         let data = '';
-        
+
         response.on('data', (chunk) => {
           data += chunk;
         });
-        
+
         response.on('end', () => {
           try {
             if (response.statusCode === 200) {
               const jsonResponse = JSON.parse(data);
-              const isHealthy = jsonResponse.code === 200 && 
-                              jsonResponse.message && 
+              const isHealthy = jsonResponse.code === 200 &&
+                              jsonResponse.message &&
                               jsonResponse.message.includes('healthy');
-              
+
               // debug(`Health check response: ${response.statusCode}, healthy: ${isHealthy}`);
               resolve(isHealthy);
             } else {
@@ -144,7 +144,7 @@ export class HealthMonitor {
     const wasDown = this.currentlyDown;
     this.lastSuccessTime = Date.now();
     this.consecutiveFailures = 0;
-    
+
     if (wasDown) {
       this.currentlyDown = false;
       debug(`Serveur rétabli! Connexion restaurée à ${new Date().toISOString()}`);
@@ -152,7 +152,7 @@ export class HealthMonitor {
         this.onConnectionRestored();
       }
     }
-    
+
     // Schedule next check with normal interval
     this.scheduleNextCheck(this.checkInterval);
   }
@@ -164,16 +164,16 @@ export class HealthMonitor {
   handleUnhealthyResponse(error = null) {
     this.consecutiveFailures++;
     const timeSinceLastSuccess = Date.now() - this.lastSuccessTime;
-    
+
     if (error) {
       debug(`Health check failed: ${error.message}`);
     }
-    
+
     // Vérifier si nous avons dépassé le seuil de pannes
     if (timeSinceLastSuccess >= this.failureThreshold && !this.currentlyDown) {
       this.currentlyDown = true;
       errorWithTimestamp(`🚨 Serveur inaccessible depuis ${Math.round(timeSinceLastSuccess/1000)}s - Interruption de la connexion tunnel`);
-      
+
       if (this.onConnectionLost) {
         this.onConnectionLost();
       }
@@ -183,7 +183,7 @@ export class HealthMonitor {
         errorWithTimestamp(`⏳ Serveur toujours inaccessible depuis ${Math.round(timeSinceLastSuccess/1000)}s - En attente de rétablissement...`);
       }
     }
-    
+
     // Schedule next check with faster interval when down
     const nextInterval = this.currentlyDown ? this.checkIntervalWhenDown : this.checkInterval;
     this.scheduleNextCheck(nextInterval);
@@ -191,37 +191,36 @@ export class HealthMonitor {
 
   /**
    * Attendeur qui bloque jusqu'à ce que le serveur soit de nouveau accessible
-   * Effectue toujours au moins une vérification initiale pour garantir que le serveur est vraiment UP
-   * @param {boolean} forceCheck - Si true, effectue une vérification même si currentlyDown est false
+   * Effectue au besoin une vérification initiale avant d'autoriser la reconnexion.
+   * @param {boolean} forceCheck - Si true, vérifie explicitement le serveur avant de reprendre
    * @returns {Promise<void>}
    */
   async waitForServerRecovery(forceCheck = true) {
     debug('Vérification de l\'état du serveur avant reconnexion...');
-    
-    // Toujours effectuer au moins une vérification initiale pour être sûr
+
     if (forceCheck || this.currentlyDown) {
       const initialCheck = await this.checkServerHealth();
-      
+
       if (initialCheck) {
         debug('Serveur accessible - Reconnexion autorisée');
         this.handleHealthyResponse();
         return;
       }
-      
+
       // Si la vérification initiale échoue, marquer comme down et attendre
       if (!this.currentlyDown) {
         this.currentlyDown = true;
         this.lastSuccessTime = Date.now() - this.failureThreshold; // Marquer comme down depuis le début
         errorWithTimestamp('🚨 Serveur inaccessible - Attente du rétablissement...');
       }
-    } else if (!this.currentlyDown) {
-      // Si pas de force check et pas down, on considère que c'est OK
+    } else {
       debug('Serveur considéré accessible (pas de vérification forcée)');
       return;
     }
 
     debug('Attente du rétablissement du serveur...');
-    
+    let lastWaitLogAt = 0;
+
     return new Promise((resolve) => {
       const checkRecovery = setInterval(async () => {
         try {
@@ -231,19 +230,21 @@ export class HealthMonitor {
             this.handleHealthyResponse();
             debug('✅ Serveur rétabli - Reprise de la connexion');
             resolve();
-          } else {
-            // Afficher un message toutes les 10 vérifications (~30s avec checkInterval de 3s)
-            const checkCount = Math.floor((Date.now() - this.lastSuccessTime) / this.checkInterval);
-            if (checkCount % 10 === 0) {
-              const waitTime = Math.round((Date.now() - (this.lastSuccessTime + this.failureThreshold)) / 1000);
+            return;
+          }
+
+          const now = Date.now();
+          if (now - lastWaitLogAt >= 10000) {
+            const waitTime = Math.max(0, Math.round((now - (this.lastSuccessTime + this.failureThreshold)) / 1000));
+            if (waitTime > 0) {
               errorWithTimestamp(`⏳ Serveur toujours inaccessible - En attente depuis ${waitTime}s...`);
             }
+            lastWaitLogAt = now;
           }
         } catch (error) {
-          // Continue d'attendre
           debug('Erreur lors de la vérification de santé:', error.message);
         }
-      }, this.checkInterval);
+      }, this.checkIntervalWhenDown);
     });
   }
 
@@ -266,15 +267,15 @@ export class HealthMonitor {
     if (this.intervalId) {
       clearTimeout(this.intervalId);
     }
-    
+
     if (!this.isRunning) {
       return;
     }
-    
+
     this.intervalId = setTimeout(() => {
       if (this.isRunning) {
         this.performHealthCheck();
       }
     }, interval);
   }
-} 
+}

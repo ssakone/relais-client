@@ -5,7 +5,7 @@ const path = require('path');
 const url = require('url');
 
 // Default configuration
-const DEFAULT_SERVER = 'tcp.relais.dev:1080';
+const DEFAULT_SERVER = 'tcp.relais.dev:1081';
 const DEFAULT_PROTOCOL = 'http';
 
 let debug = (...args) => {
@@ -20,12 +20,56 @@ let errorWithTimestamp = (...args) => {
   console.error(`[${timestamp}]`, ...args);
 };
 
+// Global error handlers to prevent crashes from unhandled errors
+process.on('uncaughtException', (err) => {
+  // Only log network-related errors at debug level, don't crash
+  const isNetworkError = err.code === 'ENOTFOUND' ||
+                         err.code === 'ECONNREFUSED' ||
+                         err.code === 'ETIMEDOUT' ||
+                         err.code === 'EHOSTUNREACH' ||
+                         err.code === 'ENETUNREACH' ||
+                         err.code === 'ECONNRESET' ||
+                         err.code === 'EPIPE';
+
+  if (isNetworkError) {
+    debug(`Uncaught network error (handled): ${err.code} - ${err.message}`);
+  } else {
+    errorWithTimestamp(`Uncaught exception: ${err.message}`);
+    debug('Stack trace:', err.stack);
+  }
+  // Don't exit - let the reconnection loop handle recovery
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  const err = reason instanceof Error ? reason : new Error(String(reason));
+  const isNetworkError = err.code === 'ENOTFOUND' ||
+                         err.code === 'ECONNREFUSED' ||
+                         err.code === 'ETIMEDOUT' ||
+                         err.code === 'EHOSTUNREACH' ||
+                         err.code === 'ENETUNREACH' ||
+                         err.code === 'ECONNRESET' ||
+                         err.code === 'EPIPE' ||
+                         err.message?.includes('ENOTFOUND') ||
+                         err.message?.includes('getaddrinfo');
+
+  if (isNetworkError) {
+    debug(`Unhandled rejection (network error, handled): ${err.message}`);
+  } else {
+    errorWithTimestamp(`Unhandled rejection: ${err.message}`);
+    debug('Stack trace:', err.stack);
+  }
+  // Don't exit - let the reconnection loop handle recovery
+});
+
 const program = new Command();
 
 program
   .name('relais')
   .description('Node.js client for the relay tunnel service')
-  .version('1.5.1');
+  .version('1.8.1');
+
+// Libère le raccourci -h pour l'option --host et déplace l'aide sur -H
+program.helpOption('-H, --help', 'Display help for command');
 
 program
   .command('set-token <token>')
@@ -58,20 +102,20 @@ program
       let deployType = options.type;
       let deployDomain = options.domain;
       let isUpdate = false;
-      
+
       // Configure and check deploy config file to determine if this is an update
       const { loadDeployConfig, hasDeployConfig, setDeployConfigFile } = await import('./utils/deploy-config.js');
       if (options.file) {
         setDeployConfigFile(options.file);
       }
       const configExists = await hasDeployConfig();
-      
+
       // Handle current directory specification
       if (deployFolder === '.') {
         deployFolder = process.cwd();
         debug('Using current directory:', deployFolder);
       }
-      
+
       // If no folder specified, try to load from config
       if (!deployFolder) {
         if (configExists) {
@@ -121,22 +165,22 @@ program
           }
         }
       }
-      
+
       debug('Starting deployment...');
       debug(`Folder: ${deployFolder}`);
       debug(`Type: ${deployType}`);
       if (deployDomain) debug(`Domain: ${deployDomain}`);
       debug(`Mode: ${isUpdate ? 'UPDATE' : 'CREATE'}`);
-      
+
       const { deployService } = await import('./services/deploy.js');
       const result = await deployService.deploy(deployFolder, deployType, isUpdate, deployDomain);
-      
+
       debug('Upload successful.');
       debug('Waiting for deployment status...');
-      
+
       // Poll deployment status after showing upload success
       await deployService.pollDeploymentStatus(result.id);
-      
+
     } catch (error) {
       errorWithTimestamp('Deployment failed:', error.message);
       process.exit(1);
@@ -154,9 +198,10 @@ program
   .option('-r, --remote <port>', 'Desired remote port')
   .option('-t, --type <type>', 'Protocol type (http or tcp)', DEFAULT_PROTOCOL)
   .option('--timeout <seconds>', 'Tunnel establishment timeout in seconds', '30')
-  .option('--restart-interval <minutes>', 'Tunnel restart interval in minutes', '30')
-  .option('--persistent', 'Enable persistent reconnection on network failures (default: true)')
-  .option('--no-persistent', 'Disable persistent reconnection')
+  .option('--health-check', 'Enable tunnel health checking (default: enabled)', true)
+  .option('--no-health-check', 'Disable tunnel health checking')
+  .option('--health-check-interval <seconds>', 'Health check interval in seconds', '30')
+  .option('--insecure', 'Disable encrypted tunnel mode (not recommended)')
   .option('-v, --verbose', 'Enable detailed logging')
   .action(async (options) => {
     if (options.verbose) {
@@ -174,7 +219,8 @@ program
       domain: options.domain,
       remote: options.remote,
       timeout: options.timeout,
-      restartInterval: options.restartInterval
+      healthCheck: options.healthCheck,
+      healthCheckInterval: options.healthCheckInterval
     });
 
     if (!options.port) {
@@ -201,11 +247,11 @@ program
       try {
         // Agent mode: Never stop reconnecting for network errors, only for authentication issues
         await connectAndServe(options, failureTracker);
-        
+
         // Reset failure tracker on successful connection
         failureTracker.reset();
         failureTracker.recordSuccessfulConnection();
-        
+
       } catch (err) {
         if (err.message.includes('Token') || err.message.includes('Authentication')) {
           errorWithTimestamp('This service requires authentication. Use -k <token> or the set-token command');
@@ -215,14 +261,13 @@ program
         // Handle health monitor connection loss specifically
         if (err.message.includes('Connection lost due to server health check failure')) {
           errorWithTimestamp('Connexion fermée par le monitoring de santé - Attente du rétablissement...');
-          
+
           // Create a temporary health monitor to wait for server recovery
           const { HealthMonitor } = await import('./utils/health-monitor.js');
           const tempHealthMonitor = new HealthMonitor();
-          // IMPORTANT: forceCheck=true pour toujours vérifier même si currentlyDown=false
           await tempHealthMonitor.waitForServerRecovery(true);
           tempHealthMonitor.stop();
-          
+
           debug('Serveur rétabli - Reprise de la connexion tunnel...');
           // Continue to reconnect immediately without backoff
           continue;
@@ -233,14 +278,16 @@ program
           const timeoutMatch = err.message.match(/(\d+) seconds/);
           const timeoutSeconds = timeoutMatch ? timeoutMatch[1] : '30';
           errorWithTimestamp(`⏱️  Établissement du tunnel trop lent (>${timeoutSeconds}s) - Nouvelle tentative...`);
-          
+
           // Immediate retry for timeout, no backoff
           continue;
         }
 
-        if (err.message.includes('Tunnel restart interval reached')) {
-          debug('Redémarrage périodique du tunnel');
+        // Handle tunnel health check triggered reconnection
+        if (err.message.includes('Tunnel health check triggered reconnection')) {
+          errorWithTimestamp('🔄 Reconnexion du tunnel déclenchée par la vérification de santé...');
           failureTracker.reset();
+          // Immediate retry without backoff
           continue;
         }
 

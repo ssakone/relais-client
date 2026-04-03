@@ -1,5 +1,83 @@
 # Changelog
 
+## [1.6.3] - 2025-12-13
+
+### Fixed
+- **Mobile Network Compatibility**: Fixed handshake failures on restrictive mobile networks (tested in Mali)
+  - DPI (Deep Packet Inspection) proxies were blocking JSON-formatted handshake messages
+  - Handshake now uses binary protocol (base64-encoded) to bypass DPI inspection
+  - Connection establishment is now reliable on mobile data networks worldwide
+
+### Changed
+- **Binary Handshake Protocol**: SECURE_INIT and SECURE_ACK messages are now encoded in binary format
+  - Format: `[0x00 magic byte][4-byte length][base64(JSON)]`
+  - Server auto-detects and responds in matching format
+  - Full backward compatibility with older JSON-only clients
+
+### Technical
+- Added `encodeBinaryHandshake()` and `BinaryHandshakeDecoder` in `secure-channel.js`
+- Server-side hybrid protocol detection in `tunnel.go`
+- Only handshake is affected; post-handshake AES-GCM encryption remains unchanged
+
+---
+
+## [1.6.2] - 2025-12-10
+
+### Fixed
+- **DNS Retry Crash Fix**: Fixed `TypeError: Assignment to constant variable` crash that occurred during DNS resolution retries
+  - The `ctrlConn` socket variable was incorrectly declared as `const` preventing reassignment during retry attempts
+  - Changed to `let` to allow proper socket recreation on DNS failures
+
+---
+
+## [1.6.1] - 2025-12-10
+
+### Security
+- **End-to-End Encryption by Default**: All tunnel communications are now encrypted using ECDH P-256 key exchange + AES-256-GCM
+  - Tokens and sensitive data are never transmitted in plaintext
+  - Forward secrecy with ephemeral keys per connection
+  - Authenticated encryption prevents tampering
+- **Vulnerability Fixes**:
+  - Fixed `glob` CVE-2025-64756 (command injection)
+  - Fixed `tar-fs` GHSA-vj76-c3g6-qr5v (symlink bypass)
+  - Removed deprecated `pkg` package (GHSA-22r3-9w55-cj54)
+
+### Added
+- `--insecure` flag to disable encryption (not recommended)
+
+### Removed
+- Standalone executable builds (`pkg`) - use `npm install -g relais` instead
+- `--secure` flag (encryption is now enabled by default)
+
+### Changed
+- Reduced dependencies from 204 to 97 packages
+- Silent secure handshake (no user-facing messages, debug only)
+
+---
+
+## [1.6.0] - 2025-12-02
+
+### Added
+- 🩺 **Automatic Tunnel Health Checking**: New `TunnelHealthChecker` class that continuously monitors tunnel health
+  - Verifies local port accessibility via TCP connection test
+  - For HTTP tunnels: performs HTTP request to public URL
+  - For TCP tunnels: performs TCP connection to public address/port
+  - Checks relay server availability before attempting reconnection
+- ⏳ **Waiting for Recovery Mode**: When relay server is unreachable, the client monitors continuously and reconnects automatically when the relay comes back online
+- ⚙️ **New CLI Options**:
+  - `--health-check` - Enable automatic health checking (default: enabled)
+  - `--no-health-check` - Disable automatic health checking
+  - `--health-check-interval <seconds>` - Configure check interval (default: 30 seconds)
+
+### Removed
+- 🗑️ **`--restart-interval` option**: No longer needed - the health checker now handles automatic reconnection when issues are detected
+
+### Changed
+- 🔄 **Smart Auto-Reconnection**: Tunnel automatically repairs itself when health check detects failure but relay server is accessible
+- 📦 Package description updated to reflect automatic health monitoring
+
+---
+
 ## [1.4.3] - 2025-09-05
 
 ### Deprecated
